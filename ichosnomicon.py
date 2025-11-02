@@ -1074,7 +1074,7 @@ class MusicPlaylistManager:
                 # Refresh the library list to show updated values
                 self.update_library_list()
                 
-                messagebox.showinfo("Success", "ID3 metadata updated successfully!")
+                # messagebox.showinfo("Success", "ID3 metadata updated successfully!")
                 dialog.destroy()
                 
             except Exception as e:
