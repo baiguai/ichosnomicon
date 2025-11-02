@@ -17,7 +17,7 @@ except ImportError:
 class MusicPlaylistManager:
     def __init__(self, root):
         self.root = root
-        self.root.title("Music Playlist Manager")
+        self.root.title("Ichosnomicon")
         self.root.geometry("1600x700")
         
         # Apply dark theme
@@ -1172,7 +1172,7 @@ class MusicPlaylistManager:
                            (new_tags, self.current_edit_id))
         self.conn.commit()
         self.update_library_list()
-        messagebox.showinfo("Success", "Tags updated")
+        # messagebox.showinfo("Success", "Tags updated")
             
     def __del__(self):
         """Clean up database connection"""
