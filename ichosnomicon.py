@@ -311,6 +311,12 @@ class MusicPlaylistManager:
         self.album_filter_var.trace('w', lambda *args: self.update_library_list())
         album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
         album_filter_entry.pack(side=tk.LEFT)
+
+        ttk.Label(search_frame, text="Path:").pack(side=tk.LEFT, padx=(20, 5))
+        self.path_filter_var = tk.StringVar()
+        self.path_filter_var.trace('w', lambda *args: self.update_library_list())
+        path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
+        path_filter_entry.pack(side=tk.LEFT)
         
         # Library list with scrollbar
         list_frame = ttk.Frame(parent)
@@ -825,25 +831,32 @@ class MusicPlaylistManager:
         tag_filter = self.tag_filter_var.get().lower()
         artist_filter = self.artist_filter_var.get().lower()
         album_filter = self.album_filter_var.get().lower()
+        path_filter = self.path_filter_var.get().lower()
         
         query = "SELECT id, filename, relative_path, artist, album, tags FROM songs WHERE 1=1"
         params = []
         
-        if search_term:
-            query += " AND LOWER(filename) LIKE ?"
-            params.append(f"%{search_term}%")
+        # If path filter is used, only apply path filter
+        if path_filter:
+            query += " AND LOWER(relative_path) LIKE ?"
+            params.append(f"{path_filter}%")
+        else:
+            # Otherwise apply all other filters
+            if search_term:
+                query += " AND LOWER(filename) LIKE ?"
+                params.append(f"%{search_term}%")
+                
+            if tag_filter:
+                query += " AND LOWER(tags) LIKE ?"
+                params.append(f"%{tag_filter}%")
             
-        if tag_filter:
-            query += " AND LOWER(tags) LIKE ?"
-            params.append(f"%{tag_filter}%")
-        
-        if artist_filter:
-            query += " AND LOWER(artist) LIKE ?"
-            params.append(f"%{artist_filter}%")
-        
-        if album_filter:
-            query += " AND LOWER(album) LIKE ?"
-            params.append(f"%{album_filter}%")
+            if artist_filter:
+                query += " AND LOWER(artist) LIKE ?"
+                params.append(f"%{artist_filter}%")
+            
+            if album_filter:
+                query += " AND LOWER(album) LIKE ?"
+                params.append(f"%{album_filter}%")
             
         self.cursor.execute(query, params)
         
