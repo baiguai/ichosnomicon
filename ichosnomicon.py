@@ -343,7 +343,7 @@ class MusicPlaylistManager:
         self.library_tree.bind('<<TreeviewSelect>>', self.update_selection_count)
         
         # Bind Space bar to play/stop
-        self.root.bind('<space>', lambda e: self.toggle_playback())
+        # self.root.bind('<space>', lambda e: self.toggle_playback())
         
         # Bind column headers for sorting
         for col in ['#0', 'Filename', 'Path', 'Artist', 'Album', 'Tags']:
@@ -371,7 +371,8 @@ class MusicPlaylistManager:
         
         ttk.Label(edit_frame, text="Selected song tags:").pack(side=tk.LEFT)
         self.tag_edit_var = tk.StringVar()
-        tag_edit_entry = ttk.Entry(edit_frame, textvariable=self.tag_edit_var, width=50)
+        self.tag_entry = ttk.Entry(edit_frame, textvariable=self.tag_edit_var, width=50)
+        tag_edit_entry = self.tag_entry
         tag_edit_entry.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(edit_frame, text="Update Tags", 
@@ -862,6 +863,7 @@ class MusicPlaylistManager:
             tags = item['values'][4]
             self.tag_edit_var.set(tags)
             self.current_edit_id = song_id
+            self.root.after(10, lambda: self.tag_entry.focus_set() and self.tag_entry.select_range(0, tk.END))
     
     def show_context_menu(self, event):
         """Show context menu on right-click"""
@@ -1194,8 +1196,6 @@ class MusicPlaylistManager:
                 
                 # Refresh the library list to show updated values
                 self.update_library_list()
-                
-                messagebox.showinfo("Success", "ID3 metadata updated successfully!")
                 dialog.destroy()
                 
             except Exception as e:
@@ -1293,7 +1293,6 @@ class MusicPlaylistManager:
                            (new_tags, self.current_edit_id))
         self.conn.commit()
         self.update_library_list()
-        messagebox.showinfo("Success", "Tags updated")
             
     def __del__(self):
         """Clean up database connection"""
