@@ -849,8 +849,13 @@ class MusicPlaylistManager:
         
         for row in self.cursor.fetchall():
             song_id, filename, relative_path, artist, album, tags = row
+            # Extract parent directory path without filename
+            parent_path = str(Path(relative_path).parent)
+            # Show "." for files in root directory
+            if parent_path == '.':
+                parent_path = '(root)'
             self.library_tree.insert('', tk.END, text=song_id, 
-                                    values=(filename, relative_path, artist or '', album or '', tags or ''))
+                            values=(filename, parent_path, artist or '', album or '', tags or ''))
         
         self.update_selection_count()
             
