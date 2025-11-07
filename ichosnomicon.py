@@ -37,6 +37,9 @@ class MusicPlaylistManager:
         self.currently_playing = None
         self.is_playing = False
         self.current_volume = 0.7
+        self.song_length = 0
+        self.is_seeking = False  # Flag to prevent update loop during manual seek
+        self.song_start_time = 0  # Track when song started for accurate positioning
         
         # App directory - use script location even when frozen by PyInstaller
         if getattr(sys, 'frozen', False):
@@ -259,6 +262,20 @@ class MusicPlaylistManager:
                                            foreground=self.colors['accent'])
         self.now_playing_label.pack(side=tk.LEFT, padx=10)
 
+        # Seek bar
+        self.seek_slider = ttk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                     length=300, command=self.on_seek)
+        self.seek_slider.pack(side=tk.LEFT, padx=5)
+        self.seek_slider.config(state='disabled')
+
+        # Time labels
+        self.time_label = ttk.Label(top_frame, text="0:00 / 0:00", width=12)
+        self.time_label.pack(side=tk.LEFT, padx=5)
+
+        self.now_playing_label = ttk.Label(top_frame, text="", 
+                                           foreground=self.colors['accent'])
+        self.now_playing_label.pack(side=tk.LEFT, padx=10)
+
         # Volume control
         ttk.Label(top_frame, text="Volume:").pack(side=tk.LEFT, padx=(10, 5))
 
@@ -476,10 +493,32 @@ class MusicPlaylistManager:
             pygame.mixer.music.set_volume(self.current_volume)
             pygame.mixer.music.play()
             
+            # Get song length
+            try:
+                if file_path.suffix.lower() == '.mp3' and MUTAGEN_AVAILABLE:
+                    audio = MP3(file_path)
+                    self.song_length = audio.info.length
+                else:
+                    # For non-MP3 files, we can't easily get the length
+                    # Set to 0 to disable seeking
+                    self.song_length = 0
+            except:
+                self.song_length = 0
+           
+            self.song_start_time = 0
             self.is_playing = True
             self.currently_playing = song_id
             self.play_button.config(text="⏸ Stop")
             self.now_playing_label.config(text=f"♪ {filename}")
+            
+            # Enable seek bar and start updating it
+            if self.song_length > 0:
+                self.seek_slider.config(state='normal')
+                self.seek_slider.set(0)
+                self.update_seek_bar()
+            else:
+                self.seek_slider.config(state='disabled')
+                self.time_label.config(text="--:-- / --:--")
             
             # Check when song finishes playing
             self.check_playback_status()
@@ -495,8 +534,14 @@ class MusicPlaylistManager:
         
         self.is_playing = False
         self.currently_playing = None
+        self.song_length = 0
+        self.song_start_time = 0
+        self.is_seeking = False
         self.play_button.config(text="▶ Play")
         self.now_playing_label.config(text="")
+        self.seek_slider.config(state='disabled')
+        self.seek_slider.set(0)
+        self.time_label.config(text="0:00 / 0:00")
     
     def check_playback_status(self):
         """Check if audio is still playing and update UI accordingly"""
@@ -507,6 +552,91 @@ class MusicPlaylistManager:
             else:
                 # Check again in 100ms
                 self.root.after(100, self.check_playback_status)
+
+    def on_seek(self, value):
+        """Handle seek bar changes"""
+        if not PYGAME_AVAILABLE or self.song_length <= 0:
+            return
+        
+        # Only allow seeking if we have a valid song loaded
+        if not self.currently_playing:
+            return
+        
+        # Mark that we're seeking
+        self.is_seeking = True
+        
+        # Get the desired position in seconds
+        position = (float(value) / 100) * self.song_length
+        
+        # Get the current file path
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (self.currently_playing,))
+        row = self.cursor.fetchone()
+        if not row:
+            self.is_seeking = False
+            return
+        
+        file_path = Path(self.music_root) / row[0]
+        
+        try:
+            # Reload the music file and play from position
+            pygame.mixer.music.load(str(file_path))
+            pygame.mixer.music.set_volume(self.current_volume)
+            
+            # For MP3 files, set_pos works in seconds
+            pygame.mixer.music.play(start=position)
+            
+            # Update start time for accurate position tracking
+            self.song_start_time = position
+            
+            # Resume playing state
+            if not self.is_playing:
+                self.is_playing = True
+                self.play_button.config(text="⏸ Stop")
+                self.check_playback_status()
+            
+        except Exception as e:
+            print(f"Seek error: {e}")
+        
+        finally:
+            # Re-enable the update loop after a short delay
+            self.root.after(200, lambda: setattr(self, 'is_seeking', False))
+
+    def update_seek_bar(self):
+        """Update the seek bar position based on current playback position"""
+        if self.is_playing and PYGAME_AVAILABLE and not self.is_seeking:
+            try:
+                # Get current position in milliseconds, convert to seconds
+                pos_ms = pygame.mixer.music.get_pos()
+                
+                # get_pos() returns time since start of current play, not file position
+                # Add the start time offset for accurate position
+                if pos_ms >= 0:
+                    current_pos = (pos_ms / 1000.0) + self.song_start_time
+                    
+                    # Clamp to song length
+                    if current_pos > self.song_length:
+                        current_pos = self.song_length
+                    
+                    if self.song_length > 0:
+                        # Update slider position
+                        percentage = (current_pos / self.song_length) * 100
+                        self.seek_slider.set(percentage)
+                        
+                        # Update time label
+                        current_time = self.format_time(current_pos)
+                        total_time = self.format_time(self.song_length)
+                        self.time_label.config(text=f"{current_time} / {total_time}")
+            except Exception as e:
+                pass
+            
+            # Continue updating every 100ms
+            self.root.after(100, self.update_seek_bar)
+
+    def format_time(self, seconds):
+        """Format seconds into MM:SS"""
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}:{secs:02d}"
 
     def on_volume_change(self, value):
         """Handle volume slider changes"""
