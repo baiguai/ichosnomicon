@@ -515,6 +515,9 @@ class MusicPlaylistManager:
             if self.song_length > 0:
                 self.seek_slider.config(state='normal')
                 self.seek_slider.set(0)
+                # Initialize time label
+                total_time = self.format_time(self.song_length)
+                self.time_label.config(text=f"0:00 / {total_time}")
                 self.update_seek_bar()
             else:
                 self.seek_slider.config(state='disabled')
@@ -603,7 +606,10 @@ class MusicPlaylistManager:
 
     def update_seek_bar(self):
         """Update the seek bar position based on current playback position"""
-        if self.is_playing and PYGAME_AVAILABLE and not self.is_seeking:
+        if not self.is_playing or not PYGAME_AVAILABLE:
+            return
+            
+        if not self.is_seeking:
             try:
                 # Get current position in milliseconds, convert to seconds
                 pos_ms = pygame.mixer.music.get_pos()
@@ -627,9 +633,10 @@ class MusicPlaylistManager:
                         total_time = self.format_time(self.song_length)
                         self.time_label.config(text=f"{current_time} / {total_time}")
             except Exception as e:
-                pass
-            
-            # Continue updating every 100ms
+                print(f"Seek bar update error: {e}")
+        
+        # Continue updating every 100ms while playing
+        if self.is_playing:
             self.root.after(100, self.update_seek_bar)
 
     def format_time(self, seconds):
