@@ -215,9 +215,20 @@ class MusicPlaylistManager:
     def load_config(self):
         """Load configuration including music root directory"""
         if self.config_path.exists():
-            with open(self.config_path, 'r') as f:
-                config = json.load(f)
-                self.music_root = config.get('music_root')
+            try:
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                    self.music_root = config.get('music_root')
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not load config file: {e}")
+                print("Creating new config file...")
+                # Optionally backup the corrupted file
+                if self.config_path.exists():
+                    backup_path = self.config_path.with_suffix('.json.backup')
+                    shutil.copy(self.config_path, backup_path)
+                    print(f"Backed up corrupted config to: {backup_path}")
+                # Initialize with default values
+                self.music_root = None
                 
     def save_config(self):
         """Save configuration"""
@@ -1130,7 +1141,6 @@ class MusicPlaylistManager:
                 
                 # Update the display
                 self.update_library_list()
-                messagebox.showinfo("Success", f"File renamed to: {new_filename}")
                 dialog.destroy()
                 
             except Exception as e:
@@ -1359,7 +1369,27 @@ class MusicPlaylistManager:
         ttk.Button(button_frame, text="Save", command=save_metadata, 
                   style='Accent.TButton').pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        # Auto-focus the title field
+        def focus_title():
+            title_entry = None
+            for field_name, widget in fields.items():
+                if field_name == 'title' and isinstance(widget, tk.StringVar):
+                    # Find the entry widget associated with this StringVar
+                    for child in scrollable_frame.winfo_children():
+                        if isinstance(child, ttk.Entry) and child.cget('textvariable') == str(widget):
+                            title_entry = child
+                            break
+                    break
+            
+            if title_entry:
+                title_entry.focus_set()
+                title_entry.select_range(0, tk.END)
+                title_entry.icursor(tk.END)
         
+        # Call after dialog is fully rendered
+        dialog.after(10, focus_title)
+
         # Bind Escape key to cancel
         dialog.bind('<Escape>', lambda e: dialog.destroy())
     
