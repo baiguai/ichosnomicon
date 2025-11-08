@@ -1,0 +1,3502 @@
+<!DOCTYPE html><html style="--app-height: 988px;"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1" name="viewport">
+<title>Ichosnomicon Help</title>
+<style>
+    .app {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        grid-template-rows: auto 1fr;
+        grid-template-areas:
+        "header header"
+        "tree editor";
+        width: 100%;
+        height: var(--app-height);
+    }
+
+    a {
+        color: #c6ceff;
+    }
+
+    @media (max-width: 768px) {
+        .app {
+            grid-template-columns: 1fr;
+            grid-template-areas:
+            "header"
+            "editor";
+            height: 100dvh;
+        }
+
+        .tree {
+            grid-area: unset;        /* no longer in the grid */
+            position: fixed;         /* overlays instead */
+            top: 48px;               /* adjust to your header height */
+            left: 0;
+            bottom: 0;
+            width: 75%;
+            max-width: 300px;
+            background: var(--bg);
+            border-right: 1px solid var(--border);
+            transform: translateX(-100%); /* hidden off-screen */
+            transition: transform 0.2s ease;
+            z-index: 1000;
+        }
+
+        .tree.show {
+            transform: translateX(0); /* slide in */
+        }
+
+        .editor {
+            grid-area: editor;
+            width: 100%;  /* force full width */
+            min-height: 0;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        textarea#editorArea {
+            height: 90dvh;
+            overflow: auto;
+        }
+
+        .tree-dialog {
+            width: 90vw;  /* Use most of the viewport width */
+            max-width: none;
+            min-width: unset;
+            transform: translate(-50%, -50%);
+        }
+
+        .tree-dialog-content {
+            gap: 10px;
+            padding: 14px;
+        }
+
+        .tree-dialog button {
+            font-size: 1em;
+            white-space: normal; /* Allow wrapping if needed */
+            word-break: break-word; /* Wrap long words gracefully */
+        }
+    }
+
+    .tree-dialog {
+        display: none;
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--bg);
+        color: var(--fg);
+        border: 2px solid var(--border);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+        z-index: 2000;
+    
+        /* Default width (desktop-friendly) */
+        min-width: 300px;
+        max-width: 90vw;
+        border-radius: 8px;
+    }
+    
+    /* Ensure content doesn’t feel cramped */
+    .tree-dialog-content {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 12px;
+    }
+    
+    /* Buttons: give them a bit more breathing room */
+    .tree-dialog button {
+        padding: 8px;
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid var(--btn-border);
+        border-radius: 4px;
+        cursor: pointer;
+        white-space: nowrap; /* Prevent text from wrapping */
+    }
+
+    :root {
+        --bg: #000;
+        --fg: #f5f5f5;
+        --muted: #9aa0a6;
+        --accent: #00d1b2;
+        --danger: #ff5577;
+        --sel-bg: #111827;
+        --btn-border: #555;
+        --border: #222;
+    }
+
+    * { box-sizing: border-box; }
+    /* html, body { height: 100%; } */
+    body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        display: flex;
+        min-height: 100dvh;
+    }
+    header {
+        grid-area: header;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        user-select: none;
+    }
+    header .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.green { background: var(--accent); }
+    .dot.red { background: var(--danger); }
+    .kbd-hint { color: var(--muted); }
+
+    .tree {
+        grid-area: tree;
+        border-right: 1px solid var(--border);
+        min-width: 240px;
+        overflow: auto;
+        padding: 8px;
+    }
+    .tree ul { list-style: none; margin: 0; padding-left: 16px; }
+    .tree li { margin: 2px 0; }
+
+    .node {
+        display: flex; align-items: center; gap: 8px;
+        padding: 2px 6px; border-radius: 2px;
+        cursor: default; user-select: none;
+    }
+
+    .node .twisty { width: 12px; display: inline-block; text-align: center; color: var(--muted); }
+    .node .icon { width: 16px; height: 16px; display: inline-block; color: var(--muted); }
+    .node .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .node.selected { background: var(--sel-bg); outline: 1px dashed #333; }
+
+    .editor {
+        grid-area: editor;
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        min-width: 0;
+    }
+    .status {
+        padding: 6px 10px; border-bottom: 1px solid var(--border);
+        display: flex; align-items: center; gap: 12px;
+    }
+    .status .pill { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); }
+
+    textarea#editorArea {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+        color: var(--fg);
+        border: none;
+        outline: none;
+        resize: none;
+        padding: 12px;
+        font: inherit;
+        line-height: 1.5;
+        tab-size: 4;
+        overflow: auto;
+    }
+    .footer { border-top: 1px solid var(--border); padding: 6px 10px; color: var(--muted); }
+
+    .dim { color: var(--muted); }
+    .accent { color: var(--accent); }
+    .danger { color: var(--danger); }
+
+    /* Searching */
+    .search-dialog {
+        position: fixed;
+        top: 10%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90%;                /* take almost full width on mobile */
+        max-width: 600px;          /* cap at desktop size */
+        max-height: 70%;
+        overflow: hidden;
+        background: #222;
+        color: #fff;
+        border: 2px solid #444;
+        border-radius: 4px;
+        z-index: 9999;
+        font-family: monospace;
+        padding: 10px;
+        display: none;
+        flex-direction: column;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.8);
+    }
+
+    .search-dialog input {
+        padding: 6px;
+        margin-bottom: 10px;
+        background: #111;
+        color: #fff;
+        border: 1px solid #555;
+        width: 100%;
+        font-size: 1rem;
+        box-sizing: border-box;
+    }
+
+    .search-results {
+        overflow-y: auto;
+        flex: 1;
+        border-top: 1px solid #333;
+        border-bottom: 1px solid #333;
+    }
+
+    .search-results div {
+        padding: 6px 8px;
+        cursor: pointer;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+        
+    /* Highlighted selection */
+    .search-results div.selected, 
+    .marks-list div.selected {
+        background: #444;
+    }
+
+    /* --- Mobile refinements --- */
+    @media (max-width: 480px) {
+        .search-dialog {
+            top: 5%;
+            width: 95%;       /* wider on very small screens */
+            border-radius: 3px;
+            padding: 8px;
+        }
+        .search-dialog input {
+            font-size: 0.9rem;
+            padding: 5px;
+        }
+        .search-results div {
+            font-size: 0.9rem;
+            padding: 5px 6px;
+        }
+    }
+
+    /* Links Dialog */
+    #linksDialog {
+        display: none;
+        position: fixed;
+        top: 10%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90%;                /* take almost full width on mobile */
+        max-width: 600px;          /* cap at desktop size */
+        max-height: 70%;
+        background: #222;
+        color: #fff;
+        border: 2px solid #444;
+        border-radius: 2px;
+        padding: 20px;
+        z-index: 9999;
+        font-family: monospace;
+        overflow-y: auto;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+    }
+    #marksDialog {
+        display: none;
+        position: fixed;
+        top: 10%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 700px;
+        max-height: 70%;
+        background: #222;
+        color: #fff;
+        border: 2px solid #444;
+        border-radius: 2px;
+        padding: 20px;
+        z-index: 9999;
+        font-family: monospace;
+        overflow-y: auto;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+    }
+    #linksDialog h3 {
+        margin-top: 0;
+    }
+    #linksList a {
+        display: block;
+        color: #00d1b2;
+        text-decoration: underline;
+        margin-bottom: 4px;
+        word-break: break-all;
+    }
+    #linksDialog .close {
+        margin-top: 10px;
+        color: #ccc;
+        cursor: pointer;
+        display: inline-block;
+    }
+    #linksList a.selected {
+        background: #444;
+        display: block;
+    }
+
+    /* History Dialog */
+    #historyDialog {
+        display: none;
+        position: fixed;
+        top: 10%;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 600px;
+        max-width: 90vw;
+        max-height: 70vh;
+        background: #222;
+        color: #fff;
+        border: 2px solid #444;
+        border-radius: 6px;
+
+        /* move padding to children to avoid parent padding affecting height calculations */
+        padding: 0;
+        z-index: 9999;
+        font-family: monospace;
+        box-shadow: rgba(0, 0, 0, 0.8) 0 0 20px;
+
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;        /* prevent dialog itself from scrolling */
+    }
+
+    /* header: keep height predictable and out of the scroller */
+    #historyDialog > h3 {
+        margin: 0;
+        padding: 15px 20px 8px 20px;
+        border-bottom: 1px solid #444;
+        flex-shrink: 0;
+    }
+
+    /* wrapper that holds the scrollable list */
+    #historyDialog .history-content {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;       /* ensure only child scrolls */
+        min-height: 0;          /* CRITICAL: allows it to shrink inside max-height parent */
+    }
+
+    /* the actual scrollable area */
+    #historyList {
+        flex: 1 1 auto;         /* fill remaining space under header */
+        overflow-y: auto;       /* scroll only here */
+        padding: 10px 20px 20px 20px;
+        min-height: 0;          /* CRITICAL: allows the element to shrink inside flex parent */
+        border-top: 1px solid #444;
+    }
+
+    /* ✅ Responsive adjustments for smaller screens */
+    @media (max-width: 700px) {
+        #historyDialog {
+            width: 90vw;
+            top: 5%;
+            padding: 15px;
+            border-radius: 4px;
+        }
+
+        #historyDialog h3 {
+            font-size: 1em;
+            padding-bottom: 6px;
+        }
+    }
+
+    /* Search/Replace Dialog */
+    #replaceDialog {
+        display: none;
+        position: fixed;
+        top: 15%;
+        left: 5px;
+        /* transform: translateX(-50%); */
+        width: 230px;
+        background: #222;
+        color: #fff;
+        border: 2px solid #444;
+        border-radius: 2px; /* per your request */
+        padding: 16px;
+        z-index: 9999;
+        font-family: monospace;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.8);
+    }
+    #replaceDialog h3 {
+        margin-top: 0;
+    }
+    #replaceDialog label {
+        display: block;
+        margin-bottom: 4px;
+    }
+    #replaceDialog input {
+        width: 100%;
+        padding: 6px;
+        margin-bottom: 10px;
+        background: #111;
+        color: #fff;
+        border: 1px solid #555;
+    }
+    #replaceDialog button {
+        background: #444;
+        color: #ddd;
+        border: none;
+        padding: 6px 12px;
+        margin-right: 8px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    #replaceDialog .close {
+        background: #444;
+        color: #fff;
+    }
+
+    #msg {
+        opacity: 0;
+        transition: opacity 0.6s ease; /* fade in/out */
+    }
+    #msg.visible {
+        opacity: 1;
+    }
+
+    button {
+        background: #000;
+        border: solid 1px #555;
+        color: #fff;
+    }
+
+    /* General hidden table (no borders, spacing, or visible styling) */
+    .hidden-tbl,
+    .hidden-tbl td,
+    .hidden-tbl th {
+        border: none;
+        border-collapse: collapse;
+        padding: 0;
+        margin: 0;
+    }
+
+    /* Two equal-width columns for hidden-tbl */
+    .hidden-tbl td.col2 {
+        width: 50%;
+        padding: 0.5em;
+        vertical-align: top;
+    }
+
+    /* Controls table (same hidden styling, but for controls layout) */
+    .controls-tbl,
+    .controls-tbl td,
+    .controls-tbl th {
+        border: none;
+        border-collapse: collapse;
+        padding: 0;
+        margin: 0;
+    }
+
+    /* Two equal-width columns in controls-tbl */
+    .controls-tbl td.col2 {
+        width: 50%;
+        text-align: center;
+        vertical-align: middle;
+        padding: 0.5em;
+    }
+        
+    /* Three equal-width columns in controls-tbl */
+    .controls-tbl td.col3 {
+        width: 33.33%;
+        text-align: center;
+        vertical-align: middle;
+        padding: 0.5em;
+    }
+
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 2px; }
+    ::-webkit-scrollbar-track { background: #0b0f17; }
+    </style>
+</head>
+<body>
+<div class="app">
+<header id="mobileMenu" style="display: none;">
+    <button id="hamburger" class="hamburger" style="display:none;">☰</button>
+    <button id="mblSearch" onclick="closeDialogs(); activateTree(); openSearch();">Search</button>
+    <button id="mblLinks" onclick="closeDialogs(); activateTree(); openLinksDialog();">Links</button>
+    &nbsp;
+    <button id="mblExport" onclick="closeDialogs(); exportNoteAsTxt();">Export Note</button>
+    <button id="mblSave" onclick="closeDialogs(); saveAsHtml('');">Save As</button>
+    <button id="mblSave" onclick="closeDialogs(); saveAsHtml(fileName);">Save</button>
+</header>
+
+<div id="treeDialog" class="tree-dialog">
+    <table class="hidden-tbl">
+        <tbody><tr>
+            <td class="col2">
+                <div class="tree-dialog-content">
+                    <button id="collapseBtn">- Collapse</button>
+                    <button id="addNodeBtn">+ Add Node</button>
+                    <button id="addChildBtn">+ Add Child Node</button>
+                    <button id="renameNodeBtn">? Rename Node</button>
+                    <button id="deleteNodeBtn">! Delete Node</button>
+                    <button id="closeDialogBtn">✖ Close</button>
+                </div>
+            </td>
+            <td id="treeCol2" class="col2">
+                <div>
+                    Move Selected Node:
+                </div>
+                <table class="controls-tbl">
+                    <tbody><tr>
+                        <td class="col3">&nbsp;</td>
+                        <td class="col3"> 
+                            <button id="mvUpBtn" onclick="reorderAmongSiblings('up'); render();">Up</button>
+                        </td>
+                        <td class="col3">&nbsp;</td>
+                    </tr>
+                    <tr>
+                        <td class="col3">
+                            <button id="mvLeftBtn" onclick="moveOutToParent(); render();">Left</button>
+                        </td>
+                        <td class="col3">&nbsp;</td>
+                        <td class="col3">
+                            <button id="mvRightBtn" onclick="moveIntoAsChild(); render();">Right</button>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="col3">&nbsp;</td>
+                        <td class="col3">
+                            <button id="mvDownBtn" onclick="reorderAmongSiblings('down'); render();">Down</button>
+                        </td>
+                        <td class="col3">&nbsp;</td>
+                    </tr>
+                </tbody></table>
+            </td>
+        </tr>
+    </tbody></table>
+</div>
+
+<div id="optionsDialog" style="display: none; position: fixed; top: 10%; left: 50%; transform: translateX(-50%); width: 400px; background: rgb(34, 34, 34); color: rgb(255, 255, 255); border: 2px solid rgb(68, 68, 68); border-radius: 2px; padding: 20px; z-index: 9999; font-family: monospace; box-shadow: rgba(0, 0, 0, 0.8) 0px 0px 20px;">
+    <h3>Options</h3>
+    <label><input type="checkbox" id="optShowInitHelp"> Show Init Help</label><br><br>
+    <label>File Name: <input type="text" id="optFileName" style="background:#111;color:#fff;border:1px solid #555;"></label><br><br>
+    <label><input type="checkbox" id="optModeVim"> Enable Vim Mode</label><br><br>
+    <label>Node Port: <input type="text" id="optPort" style="background:#111;color:#fff;border:1px solid #555;"></label>
+    <p>Press Enter to save, Esc to cancel.</p>
+</div>
+
+<div class="search-dialog" id="searchDialog" style="display: none;">
+    <input id="searchInput" placeholder="Search..." type="text">
+    <div class="search-results" id="searchList"><div class="selected">Other Options</div></div>
+</div>
+
+<div class="search-dialog" id="helpDialogUnified" style="display:none;">
+  <input id="helpFilter" type="text" placeholder="Filter help (Start with : to search keys only)...">
+  <div id="helpResults" class="search-results"></div>
+  <p><a href="https://hcjsuite.infinityfreeapp.com/httree_help.html" target="_blank">Full Help System</a></p>
+  <p style="margin-top:6px;">Press ESC to close.</p>
+</div>
+
+<div id="linksDialog" ondblclick="closeLinksDialog();" style="display: none;">
+    <h3>Links in Note</h3>
+    <div id="linksList"><a href="#" data-node-id="kqr4o4g3" class="selected">The Options Dialog</a></div>
+</div>
+
+<div id="marksDialog" style="display: none;">
+    <h3>Bookmarks</h3>
+    <div id="marksList"></div>
+    <p>
+        <br>
+        Press Esc to close
+        <br>
+        Press d to delete a bookmark
+    </p>
+</div>
+
+<div id="replaceDialog" style="display: none;">
+    <h3>Find &amp; Replace</h3>
+    <label for="searchText">Find</label>
+    <input id="searchText" type="text">
+    <div id="replaceTools" style="display: block;">
+        <label for="replaceText">Replace With</label>
+        <input id="replaceText" type="text">
+        <div style="display: none;">
+            <button onclick="doFind()">Find</button>
+            <button onclick="doReplaceAll()">Replace All</button>
+        </div>
+    </div>
+    <div id="replaceResults">Replaced 1 occurrence(s).</div>
+</div>
+
+<div id="historyDialog" style="display: none;">
+    <h3>History</h3>
+    <div class="history-content">
+        <div id="historyList"></div>
+    </div>
+</div>
+
+<div id="saveAsDialog" style="display: none; position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgb(0, 0, 0); color: rgb(255, 255, 255); border: 2px solid rgb(68, 68, 68); border-radius: 6px; padding: 20px; width: 320px; z-index: 9999; font-family: monospace; box-shadow: rgba(0, 0, 0, 0.8) 0px 0px 20px;">
+    <h3>Save As</h3>
+    <label>Title<br>
+        <input id="saveAsTitle" type="text" style="width:100%; background:#111; color:#fff; border:1px solid #555; margin-bottom:10px;">
+    </label>
+    <label>File Name<br>
+        <input id="saveAsFileName" type="text" style="width:100%; background:#111; color:#fff; border:1px solid #555; margin-bottom:10px;">
+    </label>
+    <p style="color:#888; font-size:0.9em;">Press Enter to save, Esc to cancel.</p>
+</div>
+
+
+<aside class="tree" id="tree" onclick="closeDialogs(); activateTree();"><ul><li><div class="node"><span class="twisty"><svg width="6" height="6" viewBox="0 0 6 6" xmlns="http://www.w3.org/2000/svg"><circle cx="3" cy="3" r="1" fill="currentColor"></circle></svg></span><span class="icon"><!--?xml version="1.0" encoding="UTF-8" standalone="no"?--> <svg width="16" height="16" viewBox="0 0 4.2333334 4.2333334" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2"></defs> <path style="fill:none;fill-opacity:1;stroke:#a5a5a5;stroke-width:0.258464;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers" d="m 0.79069024,0.63332294 c 1.68462256,-0.00621 0.87336156,0 2.51966116,0 V 3.6027704 H 0.79069024 Z" id="path65"></path> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5117" width="1.3229166" height="0.24694447" x="1.3890625" y="1.3934721"></rect> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5737" width="1.3229166" height="0.24694447" x="1.3890625" y="1.887361"></rect> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5739" width="1.3229166" height="0.24694447" x="1.3890625" y="2.3812501"></rect> </svg></span><span class="title">Ichosnomicon</span></div></li><li><div class="node"><span class="twisty"><svg width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M3 1 L7 5 L3 9 Z" fill="currentColor"></path></svg></span><span class="icon"><!--?xml version="1.0" encoding="UTF-8" standalone="no"?--> <svg width="16" height="16" viewBox="0 0 4.2333332 4.2333333" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2"></defs> <g id="layer1"> <path style="fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:0.264583;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" d="M 0.26458332,0.52916666 H 1.8520833 l 0.79375,0.52916664 1.3229167,1e-7 v 2.6458333 l -3.70416668,-10e-8 V 0.52916666" id="path2433"></path> </g> </svg></span><span class="title">The Root Directory</span></div></li><li><div class="node"><span class="twisty"><svg width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M1 3 L5 7 L9 3 Z" fill="currentColor"></path></svg></span><span class="icon"><!--?xml version="1.0" encoding="UTF-8" standalone="no"?--> <svg width="16" height="16" viewBox="0 0 4.2333332 4.2333333" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2"></defs> <g id="layer1"> <path style="fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:0.264583;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" d="M 0.26458332,0.52916666 H 1.8520833 l 0.79375,0.52916664 1.3229167,1e-7 v 2.6458333 l -3.70416668,-10e-8 V 0.52916666" id="path2433"></path> </g> </svg></span><span class="title">The Primary Grid</span></div><ul><li><div class="node selected"><span class="twisty"><svg width="6" height="6" viewBox="0 0 6 6" xmlns="http://www.w3.org/2000/svg"><circle cx="3" cy="3" r="1" fill="currentColor"></circle></svg></span><span class="icon"><!--?xml version="1.0" encoding="UTF-8" standalone="no"?--> <svg width="16" height="16" viewBox="0 0 4.2333334 4.2333334" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2"></defs> <path style="fill:none;fill-opacity:1;stroke:#a5a5a5;stroke-width:0.258464;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers" d="m 0.79069024,0.63332294 c 1.68462256,-0.00621 0.87336156,0 2.51966116,0 V 3.6027704 H 0.79069024 Z" id="path65"></path> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5117" width="1.3229166" height="0.24694447" x="1.3890625" y="1.3934721"></rect> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5737" width="1.3229166" height="0.24694447" x="1.3890625" y="1.887361"></rect> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5739" width="1.3229166" height="0.24694447" x="1.3890625" y="2.3812501"></rect> </svg></span><span class="title">Introduction to the Primary Grid</span></div></li></ul></li></ul></aside>
+<section class="editor">
+    <div id="statusBar" class="status" onclick="closeDialogs();" ondblclick="toggleMobileMenu();" title="Double click to toggle Mobile Mode">
+        <span class="pill" id="mode" style="display: block;">TREE</span>
+        <span class="pill" id="kind">FILE</span>
+        <span class="dim" id="path">/The Primary Grid</span>
+        <span class="pill" id="msg"></span>
+    </div>
+    <textarea id="editorArea" spellcheck="false" readonly="readonly"></textarea>
+</section>
+</div>
+
+<input type="file" id="filePicker" accept=".html" style="display:none;">
+
+<script>
+        //---- Data Model ------------------------------------------------------
+        const makeId = () => Math.random().toString(36).slice(2, 10);
+
+        /** @typedef {{ id:string, title:string, content:string, children:NodeT[], expanded:boolean }} NodeT */
+
+        /** @type {NodeT[]} */
+        let treeData = [
+  {"id":"aex39q4o","title":"Ichosnomicon","content":"Ichosnomicon\n--------------------------------------------------------------------------------\n\nIchos in Greek means sound or noise.\n\nIchosnomicon is a local music library management tool that is capable of\ncreating playlists or copying the selected files into a specified folder so it\ncan be copied to other devices like phones or other computers.\n\nIt is also capable of updating the ID3 tags of your mp3 files.","children":[],"expanded":false},{"id":"rzc5v2zm","title":"The Root Directory","content":"","children":[{"id":"kfjxhg4n","title":"The Root Directory","content":"The Root Directory\n--------------------------------------------------------------------------------\n\nThe root directory is either the home folder that houses all of your music\nfiles, OR it could be a sub directory within your music collection, it is up to\nyou.","children":[],"expanded":false},{"id":"v3bdfrd7","title":"Scanning the Root Directory","content":"Scanning the Root Directory\n--------------------------------------------------------------------------------\n\nWhen you select a root directory an Ichosnomicon database is created there.\nThis allows the stored data to be relative to the database.\nThis means if you move the folder to a different location, the database will\nstill function because it references your music relative to the database.\n\n** Note **:\nIf you make any changes to this root directory - like adding, updating, or\nremoving files and directories, you will want to re-run the Scan Directory\ncommand.","children":[],"expanded":false}],"expanded":false},{"id":"rdi3sgg4","title":"The Primary Grid","content":"","children":[{"id":"aalpl1fh","title":"Introduction to the Primary Grid","content":"Introduction to the Primary Grid\n--------------------------------------------------------------------------------\n\nWhen you select a new directory root OR an existing one, the primary grid is\npopulated with any music files that Ichosnomicon encounters within the directory\nand its sub-folders.\n\nAny artist or album ID3 information in your mp3s as well as any tags you've\nstored through Ichosnomicon are shown in this grid.\n\nYou can use this information to filter the music files to create playlists from.","children":[],"expanded":false}],"expanded":true}
+];
+
+
+        let bookmarks = [];
+
+        // !@!
+        const readOnly = false;
+
+
+
+        const SAFE_MAP = {
+            "</script": "^^^script^^^",
+            "</style": "^^^style^^^",
+            "]]>": "^^^cdata^^^",
+            "];": "^^^array^^^",
+            "\\);": "^^^func^^^"
+        };
+
+        let nodePort = 0;
+
+        let currentEditorNodeId = null;
+        let historyStack = [
+    {
+        "id": "aex39q4o",
+        "title": "Ichosnomicon"
+    },
+    {
+        "id": "aalpl1fh",
+        "title": "Introduction to the Primary Grid"
+    }
+];
+        let showingHistory = false;
+        let historyIndex = 0;
+        const historyStackMax = 30;
+
+        let copiedNoteId = null;
+
+        let fileName = "ichos_help";
+        let showInitHelp = false;
+        let selectedId = null;
+        let editing = false;
+        let showingLinks = false;
+        let showingMarks = false;
+        let showingHelp = false;
+        let marksIndex = 0;
+        let finding = false;
+        let mode_vim = true;
+        let mode_insert = false;
+        let mode_repeat = 1;
+        let mode_counting = false;
+        let mode_going = false;
+        let mode_deleting = false;
+
+        let mode_visual = false;
+        let mode_visual_line = false;
+        let visual_start = 0;
+        let visual_end = 0;
+        let vim_clipboard = '';
+
+        let undoValue = "";
+
+        let searchActive = false;
+        let searchMatches = [];
+        let searchIndex = 0;
+        const helpDialog = document.getElementById('helpDialog');
+        const helpDialogVimEdit = document.getElementById('helpDialogVimEdit');
+        const helpDialogVimDisabled = document.getElementById('helpDialogVimDisabled');
+        const optionsDialog = document.getElementById('optionsDialog');
+        const saveAsDialog = document.getElementById('saveAsDialog');
+        const searchDialog = document.getElementById('searchDialog');
+        const replaceDialog = document.getElementById('replaceDialog');
+        const linksDialog = document.getElementById('linksDialog');
+        const marksDialog = document.getElementById('marksDialog');
+        const historyDialog = document.getElementById('historyDialog');
+        const marksList = document.getElementById('marksList');
+        const searchInput = document.getElementById('searchInput');
+        const searchList = document.getElementById('searchList');
+        const optShowInitHelp = document.getElementById('optShowInitHelp');
+        const optFileName = document.getElementById('optFileName');
+        const optModeVim = document.getElementById('optModeVim');
+        const optPort = document.getElementById('optPort');
+        let optionFields = [optShowInitHelp, optFileName, optModeVim];
+        let optionIndex = 0;
+
+        let findMatches = [];
+        let findIndex = 0;
+
+        const helpReadOnly = [
+            { key: "j", mode: "TREE", description: "Select next tree node" },
+            { key: "k", mode: "TREE", description: "Select the previous tree node" },
+            { key: "l", mode: "TREE", description: "Expand the current tree node" },
+            { key: "h", mode: "TREE", description: "Collapse the current tree node" },
+            { key: "u", mode: "TREE", description: "Go up a tree node level" },
+            { key: "C", mode: "TREE", description: "Collapse all the tree nodes" },
+            { key: "E", mode: "TREE", description: "Expand all the tree nodes" },
+            { key: "]", mode: "TREE", description: "Expand the treeview panel" },
+            { key: "[", mode: "TREE", description: "Shrink the treeview panel" },
+            { key: "/", mode: "TREE", description: "Search (begin with : to search labels)" },
+            { key: "f", mode: "TREE", description: "Find text in the current note " },
+            { key: "#", mode: "TREE", description: "Show note links dialog" },
+            { key: "<", mode: "TREE", description: "Show the history dialog" },
+            { key: "gg", mode: "TREE", description: "Select first root tree node" },
+            { key: "G", mode: "TREE", description: "Select last root tree node" },
+            { key: "T", mode: "TREE", description: "Export current note as .txt" },
+            { key: "m", mode: "TREE", description: "Bookmark current node" },
+            { key: "`", mode: "TREE", description: "Show bookmarks" },
+        ];
+
+//            { key: ",", mode: "TREE", description: "Select the next sibling level tree node" },
+//            { key: ".", mode: "TREE", description: "Select the previous sibling level tree node" },
+        
+        const helpVimEnabled = [
+            { key: "r", mode: "TREE", description: "Add root level node" },
+            { key: "R", mode: "TREE", description: "Rename current Folder" },
+            { key: "j", mode: "TREE", description: "Select the next tree node" },
+            { key: "k", mode: "TREE", description: "Select the previous tree node" },
+            { key: "l", mode: "TREE", description: "Expand the current tree node" },
+            { key: "h", mode: "TREE", description: "Collapse the current tree node" },
+            { key: "u", mode: "TREE", description: "Go up a tree node level" },
+            { key: "C", mode: "TREE", description: "Collapse all the tree nodes" },
+            { key: "E", mode: "TREE", description: "Expand all the tree nodes" },
+            { key: "A", mode: "TREE", description: "Add child tree node" },
+            { key: "a", mode: "TREE", description: "Add next sibling tree node" },
+            { key: "]", mode: "TREE", description: "Expand the treeview panel" },
+            { key: "[", mode: "TREE", description: "Shrink the treeview panel" },
+            { key: "gg", mode: "TREE", description: "Select first root tree node" },
+            { key: "G", mode: "TREE", description: "Select last root tree node" },
+            { key: "y", mode: "TREE", description: "Copy note node" },
+            { key: "p", mode: "TREE", description: "Paste copied note node" },
+            { key: "H", mode: "TREE", description: "Move current node to the parent node" },
+            { key: "L", mode: "TREE", description: "Make current node a child node" },
+            { key: "J", mode: "TREE", description: "Move current node down" },
+            { key: "K", mode: "TREE", description: "Move current node up" },
+            { key: "D", mode: "TREE", description: "Delete the current node" },
+            { key: "i", mode: "TREE", description: "Edit current note - NORMAL mode" },
+            { key: "I", mode: "TREE", description: "Edit current note - INSERT mode" },
+            { key: "/", mode: "TREE", description: "Search (begin with : to search labels)" },
+            { key: "f", mode: "TREE", description: "Find/Replace text in the current note " },
+            { key: "#", mode: "TREE", description: "Show note links dialog" },
+            { key: "<", mode: "TREE", description: "Show the history dialog" },
+            { key: "X", mode: "TREE", description: "Show broken note links" },
+            { key: "s", mode: "TREE", description: "Save the current file" },
+            { key: "S", mode: "TREE", description: "Save as" },
+            { key: "n", mode: "TREE", description: "Save via NodeJs saver server" },
+            { key: "T", mode: "TREE", description: "Export current note as .txt" },
+            { key: "U", mode: "TREE", description: "Upgrade (import existing data)" },
+            { key: "m", mode: "TREE", description: "Bookmark current node" },
+            { key: "`", mode: "TREE", description: "Show bookmarks" },
+            { key: "!", mode: "TREE", description: "Display options dialog" },
+
+            { key: "a", mode: "NORMAL", description: "Enter insert mode, where you can write text normally" },
+            { key: "h", mode: "NORMAL", description: "Move left" },
+            { key: "l", mode: "NORMAL", description: "Move right" },
+            { key: "j", mode: "NORMAL", description: "Move down" },
+            { key: "k", mode: "NORMAL", description: "Move up" },
+            { key: "0", mode: "NORMAL", description: "Jump to the beginning of the line" },
+            { key: "$", mode: "NORMAL", description: "Jump to the end of the line" },
+            { key: "w", mode: "NORMAL", description: "Move forward one word" },
+            { key: "W", mode: "NORMAL", description: "Move back a word" },
+            { key: "D", mode: "NORMAL", description: "Delete everything right of the cursor" },
+            { key: "dd", mode: "NORMAL", description: "Delete current row" },
+            { key: "gg", mode: "NORMAL", description: "Go to the start of the note" },
+            { key: "#gg", mode: "NORMAL", description: "Go to the specified line (where # is a number)" },
+            { key: "G", mode: "NORMAL", description: "Go to the end of the note" },
+            { key: "V", mode: "NORMAL", description: "Enter line select mode" },
+            { key: "v", mode: "NORMAL", description: "Enter standard select mode" },
+            { key: "x", mode: "NORMAL", description: "Delete the character under the cursor" },
+            { key: "r", mode: "NORMAL", description: "Updates the undo cache with the current note text" },
+            { key: "u", mode: "NORMAL", description: "Restores the note text to the undo cache value" },
+
+            { key: "y", mode: "VISUAL", description: "Virtual copy the selected text" },
+            { key: "x", mode: "VISUAL", description: "Virtual cut the selected text" },
+            { key: "d", mode: "VISUAL", description: "Delete selected text" },
+
+            { key: "Control+-", mode: "INSERT/NORMAL", description: "Insert horizontal line" },
+            { key: "Control+\\", mode: "INSERT/NORMAL", description: "Wrap selected text" },
+            { key: "Control+;", mode: "INSERT/NORMAL", description: "Converts the selected text to a table" },
+
+            { key: "<number>", mode: "NORMAL", description: "If you enter a number first, some commands will repeat that many times." },
+        ];
+        
+        const helpVimDisabled = [
+            { key: "r", mode: "TREE", description: "Add root level node" },
+            { key: "R", mode: "TREE", description: "Rename current Folder" },
+            { key: "j", mode: "TREE", description: "Select the next tree node" },
+            { key: "k", mode: "TREE", description: "Select the previous tree node" },
+            { key: "l", mode: "TREE", description: "Expand the current tree node" },
+            { key: "h", mode: "TREE", description: "Collapse the current tree node" },
+            { key: "u", mode: "TREE", description: "go up a tree node level" },
+            { key: "C", mode: "TREE", description: "Collapse all the tree nodes" },
+            { key: "E", mode: "TREE", description: "Expand all the tree nodes" },
+            { key: "A", mode: "TREE", description: "Add child tree node" },
+            { key: "a", mode: "TREE", description: "Add next sibling tree node" },
+            { key: "]", mode: "TREE", description: "Expand the treeview panel" },
+            { key: "[", mode: "TREE", description: "Shrink the treeview panel" },
+            { key: "gg", mode: "TREE", description: "Select first root tree node" },
+            { key: "G", mode: "TREE", description: "Select last root tree node" },
+            { key: "y", mode: "TREE", description: "Copy note node" },
+            { key: "p", mode: "TREE", description: "Paste copied note node" },
+            { key: "H", mode: "TREE", description: "Move current node to the parent node" },
+            { key: "L", mode: "TREE", description: "Make current node a child node" },
+            { key: "J", mode: "TREE", description: "Move current node down" },
+            { key: "K", mode: "TREE", description: "Move current node up" },
+            { key: "D", mode: "TREE", description: "Delete the current node" },
+            { key: "i", mode: "TREE", description: "Edit current note" },
+            { key: "I", mode: "TREE", description: "Edit current note" },
+            { key: "/", mode: "TREE", description: "Search (begin with : to search labels)" },
+            { key: "f", mode: "TREE", description: "Find/Replace text in the current note " },
+            { key: "#", mode: "TREE", description: "Show note links dialog" },
+            { key: "<", mode: "TREE", description: "Show the history dialog" },
+            { key: "X", mode: "TREE", description: "Show broken note links" },
+            { key: "s", mode: "TREE", description: "Save the current file" },
+            { key: "S", mode: "TREE", description: "Save as" },
+            { key: "n", mode: "TREE", description: "Save via NodeJs saver server" },
+            { key: "T", mode: "TREE", description: "Export current note as .txt" },
+            { key: "U", mode: "TREE", description: "Upgrade (import existing data)" },
+            { key: "m", mode: "TREE", description: "Bookmark current node" },
+            { key: "`", mode: "TREE", description: "Show bookmarks" },
+            { key: "!", mode: "TREE", description: "Display options dialog" },
+
+            { key: "Control+-", mode: "INSERT", description: "Insert horizontal line" },
+            { key: "Control+*", mode: "INSERT", description: "Convert selection to list" },
+            { key: "Control+\\", mode: "INSERT", description: "Wrap selected text" },
+        ];
+
+
+        //---- Utilities -------------------------------------------------------
+        function generateId() {
+            return Math.random().toString(36).substr(2, 9);
+        }
+        function findNode(id) {
+            for (const n of treeData) {
+                if (n.id === id) return n;
+            }
+        }
+        function findNodeAndParentById(id, nodes = treeData, parent = null) {
+            for (const n of nodes) {
+                if (n.id === id) return { node: n, parent };
+                const res = findNodeAndParentById(id, n.children, n);
+                if (res) return res;
+            }
+            return null;
+        }
+        function getSiblingsAndIndex(id) {
+            const info = findNodeAndParentById(id);
+            if (!info) return null;
+            const siblings = info.parent ? info.parent.children : treeData;
+            const index = siblings.findIndex(n => n.id === id);
+            return { siblings, index, parent: info.parent };
+        }
+        function isFolder(n){ return (n.content || "").trim().length === 0; }
+        function updateTitleFromContent(n){
+            if (n.content === "") return;
+            const firstLine = (n.content||"").split(/\r?\n/)[0].trim();
+            if (firstLine) n.title = firstLine.slice(0, 80);
+            else if (!n.title || !n.title.startsWith("New")) n.title = "New Folder";
+        }
+        function computePath(id, lengthMax = 50) {
+            const segments = [];
+            (function walk(id, isRootCall = true) {
+                const info = findNodeAndParentById(id);
+                if (!info) return;
+                if (info.parent) walk(info.parent.id, false);
+                if (!isRootCall) {
+                    // only push if not the starting node
+                    segments.push(info.node.title || "Untitled");
+                }
+            })(id, true);
+        
+            let path = '/' + segments.join('/');
+        
+            if (path.length > lengthMax) {
+                // Trim from the left side until it fits
+                while (path.length > lengthMax && segments.length > 1) {
+                    segments.shift(); // remove first segment
+                    path = '/…/' + segments.join('/');
+                }
+            }
+        
+            return path;
+        }
+        function recordHistory(id) {
+            const node = findNodeAndParentById(id)?.node;
+            if (!node) return;
+            if (isFolder(node)) return; // only record notes
+        
+            // Remove any existing entry for this id
+            historyStack = historyStack.filter(entry => entry.id !== id);
+        
+            // Add it at the end (latest)
+            historyStack.push({ id, title: node.title || "(untitled)" });
+        
+            if (historyStack.length > historyStackMax) {
+                historyStack.shift();
+            }
+        }
+        function showMessage(msgText, duration = 3000) {
+            // clear any existing timers
+            clearTimeout(msgTimeout);
+        
+            // set text and fade in
+            msgEl.textContent = msgText;
+            msgEl.classList.add("visible");
+        
+            // schedule fade out
+            msgTimeout = setTimeout(() => {
+                msgEl.classList.remove("visible");
+                // after fade-out transition ends, clear text
+                setTimeout(() => {
+                    msgEl.textContent = "";
+                }, 600); // matches CSS transition duration
+            }, duration);
+        }
+
+
+        //---- Rendering -------------------------------------------------------
+        const treeEl = document.getElementById('tree');
+        const mobileMenu = document.getElementById('mobileMenu');
+        const hamburgerBtn = document.getElementById('hamburger');
+        const editorArea = document.getElementById('editorArea');
+        const modeEl = document.getElementById('mode');
+        const kindEl = document.getElementById('kind');
+        const pathEl = document.getElementById('path');
+        const msgEl = document.getElementById('msg');
+        let msgTimeout;
+
+        function render(){
+            // Render tree
+            treeEl.innerHTML = '';
+            const ul = document.createElement('ul');
+            treeEl.appendChild(ul);
+
+            function renderNode(n){
+                const li = document.createElement('li');
+                const row = document.createElement('div');
+                row.className = 'node' + (n.id === selectedId ? ' selected' : '');
+
+                // Twisty indicator
+                const twist = document.createElement('span');
+                twist.className = 'twisty';
+                if (n.children.length) {
+                    twist.innerHTML = n.expanded
+                    ? `<svg width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M1 3 L5 7 L9 3 Z" fill="currentColor" /></svg>`
+                    : `<svg width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg"><path d="M3 1 L7 5 L3 9 Z" fill="currentColor" /></svg>`;
+                } else {
+                    twist.innerHTML = `<svg width="6" height="6" viewBox="0 0 6 6" xmlns="http://www.w3.org/2000/svg"><circle cx="3" cy="3" r="1" fill="currentColor" /></svg>`;
+                }
+
+                // Icon
+                const icon = document.createElement('span');
+                icon.className = 'icon';
+                icon.innerHTML = isFolder(n)
+                    ? `<?xml version="1.0" encoding="UTF-8" standalone="no"?> <svg width="16" height="16" viewBox="0 0 4.2333332 4.2333333" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2" /> <g id="layer1"> <path style="fill:none;fill-opacity:1;stroke:#ffffff;stroke-width:0.264583;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1" d="M 0.26458332,0.52916666 H 1.8520833 l 0.79375,0.52916664 1.3229167,1e-7 v 2.6458333 l -3.70416668,-10e-8 V 0.52916666" id="path2433" /> </g> </svg>`
+                    : `<?xml version="1.0" encoding="UTF-8" standalone="no"?> <svg width="16" height="16" viewBox="0 0 4.2333334 4.2333334" version="1.1" id="svg5" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg"> <defs id="defs2" /> <path style="fill:none;fill-opacity:1;stroke:#a5a5a5;stroke-width:0.258464;stroke-linecap:square;stroke-linejoin:miter;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers" d="m 0.79069024,0.63332294 c 1.68462256,-0.00621 0.87336156,0 2.51966116,0 V 3.6027704 H 0.79069024 Z" id="path65" /> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5117" width="1.3229166" height="0.24694447" x="1.3890625" y="1.3934721" /> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5737" width="1.3229166" height="0.24694447" x="1.3890625" y="1.887361" /> <rect style="fill:#757575;fill-opacity:1;stroke-width:1.7147;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="rect5739" width="1.3229166" height="0.24694447" x="1.3890625" y="2.3812501" /> </svg>`;
+
+                const title = document.createElement('span');
+                title.className = 'title';
+                title.textContent = n.title || '(untitled)';
+
+                row.addEventListener('click', () => {
+                    selectedId = n.id;
+                    modeEl.textContent = 'TREE';
+                    editing = false;
+                    mode_insert = false;
+                    if (n.children.length) {
+                        n.expanded = !n.expanded; // toggle when clicking row
+                        editorArea.content = "";
+                    } else {
+                        if (window.innerWidth <= 768 && n.content !== "") {
+                            treeEl.classList.remove('show');
+                        }
+                    }
+                    render();
+                });
+
+                row.appendChild(twist); row.appendChild(icon); row.appendChild(title);
+
+                li.appendChild(row);
+
+                if (n.expanded && n.children.length){
+                    const inner = document.createElement('ul');
+                    for (const c of n.children) inner.appendChild(renderNode(c));
+                    li.appendChild(inner);
+                }
+                return li;
+            }
+
+            for (const n of treeData) ul.appendChild(renderNode(n));
+
+            // Render editor status + content
+            const selInfo = findNodeAndParentById(selectedId);
+            if (selInfo){
+                pathEl.textContent = computePath(selInfo.node.id);
+                kindEl.textContent = isFolder(selInfo.node) ? 'FOLDER' : 'FILE';
+                if (!editing) {
+                    if (currentEditorNodeId !== selInfo.node.id) {
+                        editorArea.value = safeRestoreText(selInfo.node.content) || '';
+                        addUndo();
+                        currentEditorNodeId = selInfo.node.id;
+                    }
+                    editorArea.setAttribute('readonly', 'readonly');
+                } else {
+                    editorArea.removeAttribute('readonly');
+                    // keep as-is while editing
+                }
+            } else {
+                pathEl.textContent = '/';
+                kindEl.textContent = '—';
+                editorArea.value = '';
+                editorArea.setAttribute('readonly', 'readonly');
+            }
+
+            if (editing) {
+                if (mode_insert) {
+                    modeEl.textContent = 'INSERT';
+                } else if (mode_visual) {
+                    modeEl.textContent = mode_visual_line ? 'VISUAL LINE' : 'VISUAL';
+                } else {
+                    modeEl.textContent = 'NORMAL';
+                }
+            } else {
+                modeEl.textContent = 'TREE';
+            }
+
+            if (selectedId) recordHistory(selectedId);
+
+            // Ensure selected node is visible
+            setTimeout(() => {
+                const selEl = document.querySelector('.node.selected');
+                if (selEl) selEl.scrollIntoView({ block: "nearest" });
+            }, 0);
+        }
+
+
+        //---- Editor Sync -----------------------------------------------------
+        editorArea.addEventListener('input', () => {
+            syncFile();
+            scheduleAutoSave();
+        });
+
+        editorArea.addEventListener('click', () => {
+            if (!readOnly) {
+                mode_insert = true;
+                editing = true;
+                render();
+            }
+
+            // Close dialogs - this is for mobile envs
+            closeDialogs();
+
+            editorArea.focus();
+            // editorArea.setSelectionRange(0, 0); 
+            // scrollToCursor();
+        });
+
+        function syncFile() {
+            const info = findNodeAndParentById(selectedId);
+            if (!info) return;
+
+            info.node.content = safeStoreText(editorArea.value);
+            updateTitleFromContent(info.node);
+            // File vs folder might have changed; keep UI responsive
+            render();
+        }
+
+        function addUndo() {
+            undoValue = editorArea.value;
+        }
+
+        function safeStoreText(text) {
+            if (!text) return "";
+            for (const [raw, safe] of Object.entries(SAFE_MAP)) {
+              text = text.replace(new RegExp(raw, "gi"), safe);
+            }
+            return text;
+        }
+
+        function safeRestoreText(text) {
+            if (!text) return "";
+            for (const [raw, safe] of Object.entries(SAFE_MAP)) {
+                // escape special chars in safe before making regex
+                const esc = safe.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+                text = text.replace(new RegExp(esc, "gi"), raw);
+            }
+            return text;
+        }
+
+        editorArea.addEventListener('blur', (e) => {
+            syncFile();
+        });
+
+        editorArea.addEventListener('keydown', (e) => {
+            const start = editorArea.selectionStart;
+            const end = editorArea.selectionEnd;
+            const value = editorArea.value;
+        
+            switch (e.key) {
+                case 'Tab':
+                    e.preventDefault();
+                    e.stopPropagation();
+        
+                    if (e.shiftKey) {
+                        // --- Shift+Tab = Unindent ---
+                        const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+                        const lineEnd = value.indexOf("\n", end);
+                        const affected = value.substring(lineStart, lineEnd === -1 ? value.length : lineEnd);
+        
+                        const unindented = affected.split("\n").map(line =>
+                            line.startsWith("    ") ? line.slice(4) : line
+                        ).join("\n");
+        
+                        const newValue = value.substring(0, lineStart) + unindented + value.substring(lineStart + affected.length);
+        
+                        editorArea.value = newValue;
+        
+                        // Restore selection (shrink by up to 4 per line)
+                        const lines = affected.split("\n").length;
+                        const removed = 4 * lines;
+                        editorArea.selectionStart = Math.max(start - 4, lineStart);
+                        editorArea.selectionEnd = Math.max(end - removed, editorArea.selectionStart);
+                    } else {
+                        // --- Tab = Indent ---
+                        const selection = value.substring(start, end);
+                        if (selection.includes("\n")) {
+                            const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+                            const lineEnd = value.indexOf("\n", end);
+                            const affected = value.substring(lineStart, lineEnd === -1 ? value.length : lineEnd);
+        
+                            const indented = affected.split("\n").map(line => "    " + line).join("\n");
+        
+                            const newValue = value.substring(0, lineStart) + indented + value.substring(lineStart + affected.length);
+        
+                            editorArea.value = newValue;
+        
+                            // Shift selection right
+                            const lines = affected.split("\n").length;
+                            const added = 4 * lines;
+                            editorArea.selectionStart = start + 4;
+                            editorArea.selectionEnd = end + added;
+                        } else {
+                            // Single caret or inline selection
+                            editorArea.setRangeText("    ", start, end, "end");
+                        }
+                    }
+                    break;
+        
+                case 'Enter':
+                    e.preventDefault();
+                    e.stopPropagation();
+        
+                    // --- Auto-indent on new line ---
+                    const lineStart = value.lastIndexOf("\n", start - 1) + 1;
+                    const currentLine = value.substring(lineStart, start);
+                    const indentMatch = currentLine.match(/^\s*/); // capture leading spaces
+                    const indent = indentMatch ? indentMatch[0] : "";
+        
+                    const insertText = "\n" + indent;
+        
+                    editorArea.setRangeText(insertText, start, end, "end");
+                    break;
+            }
+
+            setAppHeight();
+            scrollToCursor();
+
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                syncFile();
+
+                if (mode_insert && mode_vim) {
+                    setVimMode(false);
+                    editorArea.setSelectionRange(editorArea.selectionStart,editorArea.selectionStart);
+                } else if (mode_visual && mode_vim) {
+                    exitVisualMode();
+                    setVimMode(false);
+                } else {
+                    editing = false;
+                    editorArea.blur();
+                    render();
+                }
+
+                return;
+            }
+
+            if (!mode_insert && mode_vim) {
+                vimKeys(e);
+            }
+        });
+
+
+
+        // ---- VIM Keys -------------------------------------------------------
+        function vimKeys(e) {
+            if (mode_visual) {
+                let visProcessed = visualKeys(e);
+                if (visProcessed) {
+                    return;
+                }
+            }
+
+            e.preventDefault();
+        
+            // Normal mode logic
+            if (!isNaN(parseInt(e.key, 10))) {
+                const digit = parseInt(e.key, 10);
+                if (!mode_counting) {
+                    if (digit !== 0) {
+                        mode_repeat = digit;
+                        mode_counting = true;
+                        return;
+                    }
+                } else {
+                    mode_repeat = (mode_repeat * 10) + digit;
+                    return;
+                }
+            }
+
+
+            // Cancel any multi-key flags
+            if (e.key !== 'g') {
+                mode_going = false;
+            }
+            if (e.key !== 'd') {
+                mode_deleting = false;
+            }
+            if (mode_counting && isNaN(parseInt(e.key, 10))) {
+                mode_counting = false;
+            }
+
+        
+            // Execute commands with repeat count
+            let performed = false;
+
+
+            if (mode === "VISUAL") {
+                // Add bullet '*' at start of current line
+                if (e.key === "*") {
+                    e.preventDefault();
+                    const text = editorArea.value;
+                    const pos = editorArea.selectionStart;
+            
+                    // Find start of current line
+                    const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+                    const lineEnd = text.indexOf("\n", pos);
+                    const before = text.substring(0, lineStart);
+                    const after = text.substring(lineStart);
+            
+                    editorArea.value = before + "* " + after;
+            
+                    // keep caret in same column, but shifted by 2 chars
+                    editorArea.selectionStart = editorArea.selectionEnd = pos + 2;
+            
+                    showMessage("Bullet added");
+                    return;
+                }
+            }
+
+        
+            switch (e.key) {
+                case "i": // Enter insert mode
+                case "a":
+                    setVimMode(true);
+                    mode_insert = true;
+                    performed = true;
+                    modeEl.textContent = 'INSERT';
+                    break;
+        
+                case "h": // Move left
+                    let newPosBack = Math.max(0, editorArea.selectionStart - mode_repeat);
+                    moveChar(newPosBack, true);
+                    performed = true;
+                    break;
+        
+                case "l": // Move right
+                    let newPosFwd = Math.min(editorArea.value.length, editorArea.selectionStart + mode_repeat);
+                    moveChar(newPosFwd, false);
+                    performed = true;
+                    break;
+        
+                case "j": // Move down lines
+                    for (let i = 0; i < mode_repeat; i++) moveCursorVertical(1);
+                    performed = true;
+                    break;
+        
+                case "k": // Move up lines
+                    for (let i = 0; i < mode_repeat; i++) moveCursorVertical(-1);
+                    performed = true;
+                    break;
+        
+                case "0": // Jump to beginning of line
+                    const before0 = editorArea.value.lastIndexOf("\n", editorArea.selectionStart - 1);
+                    let moveStart = editorArea.selectionEnd = (before0 === -1 ? 0 : before0 + 1);
+                    moveChar(moveStart, false);
+                    performed = true;
+                    break;
+        
+                case "$": // Jump to end of line
+                    const after$ = editorArea.value.indexOf("\n", editorArea.selectionStart);
+                    let moveEnd = editorArea.selectionEnd = (after$ === -1 ? editorArea.value.length : after$);
+                    moveChar(moveEnd, false);
+                    performed = true;
+                    break;
+
+                case "u":
+                    if (!mode_insert) {
+                        doUndo();
+                        performed = true;
+                    }
+                    break;
+                case "r":
+                    if (!mode_insert) {
+                        addUndo();
+                        performed = true;
+                    }
+                    break;
+
+                case "v": // Enter visual mode
+                    enterVisualMode(false);
+                    performed = true;
+                    break;
+                case "V": // Enter visual line mode
+                    enterVisualMode(true);
+                    performed = true;
+                    break;
+
+                case "w": // Forward word(s)
+                    for (let i = 0; i < mode_repeat; i++) moveWord(1);
+                    performed = true;
+                    break;
+
+                case "W": // Backward word(s)
+                case "b": // Backward word(s)
+                    for (let i = 0; i < mode_repeat; i++) moveWord(-1);
+                    performed = true;
+                    break;
+        
+                case "x": // Delete character(s) under cursor
+                    const start = editorArea.selectionStart;
+                    if (start < editorArea.value.length) {
+                        editorArea.setRangeText("", start, start + mode_repeat, "end");
+                    }
+                    performed = true;
+                    break;
+
+                case "g": // Possible gg
+                    if (mode_going) {
+                        if (mode_repeat > 1) {
+                            // Go to line N
+                            const lines = editorArea.value.split("\n");
+                            const lineIndex = Math.min(mode_repeat - 1, lines.length - 1);
+                            let pos = 0;
+                            for (let i = 0; i < lineIndex; i++) {
+                                pos += lines[i].length + 1;
+                            }
+                            performed = true;
+
+                            moveChar(pos, true);
+                        } else {
+                            moveChar(0, true);
+                            performed = true;
+                        }
+
+                        scrollToCursor();
+                    } else {
+                        mode_going = true;
+                    }
+                    break;
+
+                case "D": // Delete to end of line(s)
+                    const text = editorArea.value;
+                    let startDelEnd = editorArea.selectionStart;
+                    let end = text.indexOf("\n", startDelEnd);
+            
+                    if (end === -1) end = text.length;
+            
+                    editorArea.setSelectionRange(startDelEnd, end);
+                    editorArea.setRangeText("", startDelEnd, end, "start");
+                    editorArea.selectionStart = editorArea.selectionEnd = startDelEnd;
+                    e.preventDefault();
+                    syncFile();
+                    performed = true;
+                    break;
+
+                case "d": // Possible dd
+                    doDelete();
+                    break;
+
+                case "G": // End of buffer, or Nth line
+                    const bufEnd = editorArea.selectionEnd = editorArea.value.length;
+                    moveChar(bufEnd, false);
+                    performed = true;
+                    scrollToCursor();
+                    break;
+            }
+        
+            if (performed) {
+                keyPerformed();
+            }
+        
+            // --- Helper for j/k ---
+            function moveCursorVertical(direction) {
+                const text = editorArea.value;
+                let pos = 0;
+
+                if (mode_visual) {
+                    pos = visual_end;
+                } else {
+                    pos = editorArea.selectionStart;
+                }
+        
+                // Find current line start/end
+                const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+                const lineEnd = text.indexOf("\n", pos);
+                const currentCol = pos - lineStart;
+        
+                // Target line
+                let targetLineStart, targetLineEnd;
+                if (direction > 0) { // down
+                    if (lineEnd === -1) return; // already last line
+                    targetLineStart = lineEnd + 1;
+                    targetLineEnd = text.indexOf("\n", targetLineStart);
+                    if (targetLineEnd === -1) targetLineEnd = text.length;
+                } else { // up
+                    if (lineStart === 0) return; // already first line
+                    targetLineEnd = lineStart - 1;
+                    targetLineStart = text.lastIndexOf("\n", targetLineEnd - 1) + 1;
+                }
+        
+                // Keep column if possible, else move to end of line
+                const targetPos = Math.min(targetLineStart + currentCol, targetLineEnd);
+
+                if (mode_visual) {
+                    visual_end = targetPos;
+                    updateVisualSelection();
+                } else {
+                    editorArea.selectionStart = editorArea.selectionEnd = targetPos;
+                }
+            }
+
+            function moveWord(direction) {
+                const text = editorArea.value;
+                let pos = 0;
+
+                if (mode_visual) {
+                    pos = visual_end;
+                } else {
+                    pos = editorArea.selectionStart;
+                }
+
+                if (direction > 0) {
+                    // Skip current non-word chars
+                    while (pos < text.length && /\W/.test(text[pos])) pos++;
+                    // Skip word chars
+                    while (pos < text.length && /\w/.test(text[pos])) pos++;
+                } else {
+                    // Move left past non-word chars
+                    while (pos > 0 && /\W/.test(text[pos - 1])) pos--;
+                    // Move left past word chars
+                    while (pos > 0 && /\w/.test(text[pos - 1])) pos--;
+                }
+
+                if (mode_visual) {
+                    visual_end = pos;
+                    updateVisualSelection();
+                } else {
+                    editorArea.selectionStart = editorArea.selectionEnd = pos;
+                }
+            }
+
+            function moveChar(newPos, goingBack) {
+                const text = editorArea.value;
+
+                if (mode_visual) {
+                    visual_end = newpos;
+                    if (goingBack) {
+                        visual_end = newPos + 1;
+                    }
+                    updateVisualSelection();
+                } else {
+                    editorArea.selectionStart = editorArea.selectionEnd = newPos;
+                }
+            }
+
+            function doDelete() {
+                if (mode_deleting) {
+                    const text = editorArea.value;
+                    const pos = editorArea.selectionStart;
+                
+                    // Find start of current line
+                    const lineStart = text.lastIndexOf("\n", pos - 1) + 1;
+                
+                    // Find end of current line INCLUDING newline
+                    let lineEnd = text.indexOf("\n", pos);
+                    if (lineEnd === -1) {
+                        lineEnd = text.length;
+                    } else {
+                        lineEnd += 1;
+                    }
+                
+                    // Repeat delete for mode_repeat > 1
+                    for (let i = 1; i < mode_repeat; i++) {
+                        const nextEnd = text.indexOf("\n", lineEnd);
+                        if (nextEnd === -1) {
+                            lineEnd = text.length;
+                            break;
+                        } else {
+                            lineEnd = nextEnd + 1;
+                        }
+                    }
+                
+                    // Delete the range
+                    editorArea.setRangeText("", lineStart, lineEnd, "start");
+                
+                    // Re-fetch updated text after deletion
+                    const newText = editorArea.value;
+                
+                    // Place cursor at start of deleted line (or end of buffer if needed)
+                    const newPos = Math.min(lineStart, newText.length);
+                    editorArea.selectionStart = editorArea.selectionEnd = newPos;
+                
+                    syncFile();
+                    performed = true;
+                } else {
+                    let start, end;
+                    
+                    start = editorArea.selectionStart;
+                    end = editorArea.selectionEnd;
+
+                    // Only delete if there's actually something selected
+                    if (start !== end) {
+                        const deletedLength = end - start;
+                    
+                        // Delete the text
+                        editorArea.setRangeText("", start, end, "start");
+                    
+                        // After deletion, the caret has shifted forward in some browsers.
+                        // Reset it back by subtracting the deleted length.
+                        let newPos = editorArea.selectionStart - deletedLength;
+                        if (newPos < 0) newPos = 0;
+                    
+                        editorArea.selectionStart = editorArea.selectionEnd = newPos;
+                        syncFile();
+                    } else {
+                        mode_deleting = true;
+                    }
+                }
+            }
+        }
+        // ---------------------------------------------------------------------
+
+        function visualKeys(e) {
+            e.preventDefault();
+            
+            switch (e.key) {
+                case "Escape":
+                    exitVisualMode();
+                    return true;
+                case "h": // Move left and extend selection
+                    visual_end = Math.max(0, visual_end - mode_repeat);
+                    updateVisualSelection();
+                    return true;
+                case "l": // Move right and extend selection  
+                    visual_end = Math.min(editorArea.value.length, visual_end + mode_repeat);
+                    updateVisualSelection();
+                    keyPerformed();
+                    return true;
+                case "d": // Delete selection (no copy)
+                    doVisualDelete(e);
+                    return true;
+                case "y": // Yank (copy)
+                    vim_clipboard = getVisualSelection();
+                    if (vim_clipboard) {
+                        navigator.clipboard.writeText(vim_clipboard).catch(err => {
+                            console.error("Clipboard write failed:", err);
+                        });
+                    }
+                    exitVisualMode();
+                    return true;
+                case "x": // Cut (copy + delete selection)
+                    vim_clipboard = getVisualSelection();
+                    if (vim_clipboard) {
+                        navigator.clipboard.writeText(vim_clipboard).catch(err => {
+                            console.error("Clipboard write failed:", err);
+                        });
+                    }
+                
+                    doVisualDelete(e);
+                    return true;
+                case "d": // Delete
+                    vim_clipboard = getVisualSelection();
+                    deleteVisualSelection();
+                    return true;
+                // Add more movement commands as needed
+            }
+
+            return false;
+        }
+
+
+
+        //---- Commands --------------------------------------------------------
+        function ensureSelection(){
+            if (!selectedId && treeData[0]) selectedId = treeData[0].id;
+        }
+
+        function keyPerformed() {
+            mode_repeat = 1;
+            mode_counting = false;
+            mode_going = false;
+            mode_deleting = false;
+        }
+
+        function activateTree() {
+            modeEl.textContent = 'TREE';
+            editing = false;
+            mode_insert = false;
+        }
+
+        function setVimMode(insertMode) {
+            if (insertMode) {
+                mode_insert = true;
+                modeEl.textContent = 'INSERT';
+            } else {
+                mode_insert = false;
+                if (mode_visual) {
+                    exitVisualMode();
+                }
+                modeEl.textContent = 'NORMAL';
+            }
+        }
+
+        function scrollToCursor() {
+            const pos = editorArea.selectionStart;
+            const textBefore = editorArea.value.slice(0, pos);
+            const lineIndex = textBefore.split("\n").length - 1;
+            const lineHeight = 16; // adjust if your textarea font-size/line-height differs
+        
+            editorArea.scrollTop = lineIndex * lineHeight;
+        }
+
+        function addRoot(){
+            if (readOnly) return;
+            const node = { id: makeId(), title: 'New Folder', content: '', children: [], expanded: true };
+            treeData.push(node);
+            selectedId = node.id;
+        }
+        function addAfter(){
+            if (readOnly) return;
+            if (!treeData || treeData.length === 0) {
+                addRoot();
+                return;
+            }
+            ensureSelection();
+            const ctx = getSiblingsAndIndex(selectedId);
+            if (!ctx) return;
+            const node = { id: makeId(), title: 'New Folder', content: '', children: [], expanded: true };
+            ctx.siblings.splice(ctx.index + 1, 0, node);
+            selectedId = node.id;
+        }
+        function addChild(){
+            if (readOnly) return;
+            if (!treeData || treeData.length === 0) return;
+            ensureSelection();
+            const info = findNodeAndParentById(selectedId);
+            if (!info) return;
+            info.node.expanded = true;
+            const node = { id: makeId(), title: 'New Folder', content: '', children: [], expanded: true };
+            info.node.children.push(node);
+            selectedId = node.id;
+        }
+        function renameFolder() {
+            if (readOnly) return;
+            if (!treeData || treeData.length === 0) return;
+            ensureSelection();
+            let selectedNode = findNodeAndParentById(selectedId).node;
+            if (isFolder(selectedNode)) {
+                let newName = prompt('Enter new folder name:', selectedNode.name);
+                if (!newName) { return; }
+                selectedNode.title = newName;
+                render();
+            }
+        }
+        function selectNextSibling(curLevelOnly) {
+            const info = findNodeAndParentById(selectedId);
+            if (!info) return;
+        
+            // Case 1: current is a folder with children
+            if (!curLevelOnly) {
+                if (isFolder(info.node) && info.node.children.length) {
+                    if (!info.node.expanded) {
+                        info.node.expanded = true; // expand if collapsed
+                    }
+                    selectedId = info.node.children[0].id;
+                    return;
+                }
+            }
+        
+            // Case 2: move to next sibling at this level
+            const ctx = getSiblingsAndIndex(selectedId);
+            if (!ctx) return;
+            if (ctx.index < ctx.siblings.length - 1) {
+                selectedId = ctx.siblings[ctx.index + 1].id;
+                return;
+            }
+        
+            // Case 3: last sibling climb ancestors until one has a next sibling
+            if (!curLevelOnly) {
+                let ancestorId = ctx.parent ? ctx.parent.id : null;
+                while (ancestorId) {
+                    const actx = getSiblingsAndIndex(ancestorId);
+                    if (!actx) break;
+            
+                    if (actx.index < actx.siblings.length - 1) {
+                        selectedId = actx.siblings[actx.index + 1].id;
+                        return;
+                    }
+            
+                    // go up another level
+                    ancestorId = actx.parent ? actx.parent.id : null;
+                }
+            }
+        }
+        function selectPrevSibling(curLevelOnly) {
+            const ctx = getSiblingsAndIndex(selectedId);
+            if (!ctx) return;
+        
+            // If we are the first child, go to parent instead
+            if (!curLevelOnly) {
+                if (ctx.index === 0 && ctx.parent) {
+                    selectedId = ctx.parent.id;
+                    return;
+                }
+            }
+        
+            // Otherwise go to previous sibling
+            const prev = Math.max(ctx.index - 1, 0);
+            selectedId = ctx.siblings[prev].id;
+        }
+        function moveRight(){
+            const info = findNodeAndParentById(selectedId); if (!info) return;
+            if (info.node.children.length && !info.node.expanded) {
+                info.node.expanded = true;
+            } else if (info.node.children.length) {
+                selectedId = info.node.children[0].id;
+            }
+        }
+        function moveLeft(doCollapse){
+            const info = findNodeAndParentById(selectedId); if (!info) return;
+            if (info.node.expanded && doCollapse) {
+                info.node.expanded = false;
+            } else {
+                if (info.parent) selectedId = info.parent.id;
+            }
+        }
+        function collapseAll(){
+            (function walk(list){
+                for (const n of list){ n.expanded = false; walk(n.children); }
+            })(treeData);
+            selectedId = treeData[0].id;
+        }
+        function expandAll(){
+            (function walk(list){
+                for (const n of list){ n.expanded = true; walk(n.children); }
+            })(treeData);
+        }
+        function gotoTop(){
+            selectedId = treeData[0].id;
+            treeEl.scrollTo(0, 0, "smooth");
+        }
+        function gotoBottom(){
+            selectedId = treeData[treeData.length-1].id;
+            treeEl.scrollTo(0, treeEl.scrollHeight, "smooth");
+        }
+        function moveOutToParent(){
+            if (readOnly) return;
+            const ctx = getSiblingsAndIndex(selectedId); if (!ctx || !ctx.parent) return; // already root
+            // Remove from current siblings
+            const [node] = ctx.siblings.splice(ctx.index, 1);
+            // Insert after parent in its own siblings list
+            const pctx = getSiblingsAndIndex(ctx.parent.id);
+            const insertAt = pctx.index + 1;
+            pctx.siblings.splice(insertAt, 0, node);
+            selectedId = node.id;
+        }
+        function moveIntoAsChild(){
+            if (readOnly) return;
+            const info = findNodeAndParentById(selectedId); if (!info) return;
+            // Move selected under some other selected? Spec: 'L' moves the current node into the currently selected node, as a child.
+            // Since there's only one selection, interpret as: move the node into its next sibling if any; else do nothing.
+            // Better: if the node has a previous sibling, move it into that sibling (common Vim tree behavior with L)?
+            // But spec says: into the currently selected node — that's the node itself; so allow moving the PREVIOUS sibling into CURRENT with hotkey on that previous sibling would be impossible.
+            // We'll interpret L as: if there is a previous sibling, move this node into that previous sibling as a child; otherwise if current has a next sibling, move into that. If neither, no-op.
+
+            const ctx = getSiblingsAndIndex(selectedId); if (!ctx) return;
+            const target = ctx.siblings[ctx.index - 1] || ctx.siblings[ctx.index + 1];
+            if (!target) return;
+            if (!Array.isArray(target.children)) target.children = [];
+            target.expanded = true;
+            const [node] = ctx.siblings.splice(ctx.index, 1);
+            target.children.push(node);
+            selectedId = node.id;
+        }
+        function reorderAmongSiblings(dir){
+            if (readOnly) return;
+            const ctx = getSiblingsAndIndex(selectedId); if (!ctx) return;
+            const newIndex = ctx.index + (dir === 'down' ? 1 : -1);
+            if (newIndex < 0 || newIndex >= ctx.siblings.length) return;
+            const [node] = ctx.siblings.splice(ctx.index, 1);
+            ctx.siblings.splice(newIndex, 0, node);
+            selectedId = node.id;
+        }
+        function deleteNode(){
+            if (readOnly) return;
+            const ctx = getSiblingsAndIndex(selectedId); if (!ctx) return;
+            const goTo = ctx.siblings[ctx.index + 1] || ctx.siblings[ctx.index - 1] || ctx.parent || treeData[0] || null;
+            ctx.siblings.splice(ctx.index, 1);
+            selectedId = goTo ? (goTo.id || goTo) : null;
+        }
+        function resizeTree(adjustment){
+            const app = document.querySelector('.app');
+            if (!app) return;
+
+            // Get the current grid-template-columns value
+            const style = window.getComputedStyle(app);
+            const gridCols = style.getPropertyValue('grid-template-columns').split(' ');
+
+            // Parse the first column (tree width)
+            let treeWidth = parseInt(gridCols[0]);
+            if (isNaN(treeWidth)) return;
+
+            treeWidth += adjustment;
+
+            if (treeWidth < 240) {
+                treeWidth = 240;
+            }
+
+            // Update the grid-template-columns
+            app.style.gridTemplateColumns = `${treeWidth}px 1fr`;
+        }
+        function insertHr() {
+            const insertText = "--------------------------------------------------------------------------------";
+            const start = editorArea.selectionStart;
+            const end = editorArea.selectionEnd;
+
+            // Insert at the cursor position
+            const text = editorArea.value;
+            editorArea.value = text.slice(0, start) + insertText + text.slice(end);
+
+            // Move the cursor to the end of the inserted text
+            editorArea.selectionStart = editorArea.selectionEnd = start + insertText.length;
+
+            syncFile();
+        }
+        function wrapSelection() {
+            const start = editorArea.selectionStart;
+            const end = editorArea.selectionEnd;
+            const text = editorArea.value;
+        
+            // Get selected text (or whole content if nothing selected)
+            const selected = start !== end ? text.slice(start, end) : text;
+        
+            // Wrap lines at <= 80 chars without breaking words
+            const words = selected.split(/\s+/);
+            let lines = [];
+            let line = "";
+        
+            for (const word of words) {
+                if ((line + word).length > 80) {
+                    lines.push(line.trimEnd());
+                    line = word + " ";
+                } else {
+                    line += word + " ";
+                }
+            }
+            if (line.trim().length > 0) lines.push(line.trimEnd());
+        
+            const wrapped = lines.join("\n");
+        
+            // Replace in editor
+            editorArea.setRangeText(wrapped, start, end, "select");
+        
+            syncFile();
+            showMessage("Wrapped to 80 characters");
+        }
+        function formatMarkdownTable() {
+            const ta = document.getElementById("editorArea");
+            const start = ta.selectionStart;
+            const end = ta.selectionEnd;
+            const value = ta.value;
+
+            // Get selection or current line if none
+            const sel = start !== end
+                ? value.slice(start, end)
+                : (() => {
+                    const ls = value.lastIndexOf("\n", start - 1) + 1;
+                    const le = value.indexOf("\n", start);
+                    return value.slice(ls, le === -1 ? value.length : le);
+                })();
+
+            if (!/\|/.test(sel)) return; // no table detected
+
+            const rawLines = sel.trim().split(/\r?\n/);
+
+            // Matches:
+            //   | ---- | ---- |   (old markdown style)
+            //   +------+------+
+            //   ----             (plain)
+            const dividerPattern = /^\s*(?:[\|+]\s*-+\s*(?:[\|+]\s*-+\s*)*[\|+]|-+)\s*$/;
+
+            const hasDivider = rawLines.some(line => dividerPattern.test(line));
+
+            // Filter out dividers for measuring widths
+            const contentLines = rawLines.filter(line => !dividerPattern.test(line));
+            if (contentLines.length === 0) return;
+
+            // Parse rows into cells
+            const table = contentLines.map(line =>
+                line.split("|")
+                    .map(c => c.trimEnd())
+                    .filter((c, i, arr) => !(i === 0 && c === "") && !(i === arr.length - 1 && c === ""))
+            );
+
+            // Compute max width per column
+            const widths = [];
+            table.forEach(row => {
+                row.forEach((cell, i) => {
+                    widths[i] = Math.max(widths[i] || 0, cell.trim().length);
+                });
+            });
+
+            // Build ASCII-style separator
+            const makeSep = () => "+" + widths.map(w => "-".repeat(w + 2)).join("+") + "+";
+
+            // Build padded table rows
+            const padded = table.map(row =>
+                "|" + row.map((cell, i) => {
+                    const trimmed = cell.trim();
+                    const pad = widths[i] - trimmed.length;
+                    return " " + trimmed + " ".repeat(pad) + " ";
+                }).join("|") + "|"
+            );
+
+            // Rebuild all lines: regenerate every separator, reformat all content
+            const finalRows = [];
+            let rowIndex = 0;
+
+            for (const line of rawLines) {
+                if (dividerPattern.test(line)) {
+                    // Always rebuild separator lines
+                    finalRows.push(makeSep());
+                } else if (rowIndex < padded.length) {
+                    // Replace content rows with padded versions
+                    finalRows.push(padded[rowIndex++]);
+                }
+            }
+
+            // If no dividers were present at all, just output the padded content
+            if (!hasDivider) {
+                finalRows.length = 0;
+                finalRows.push(...padded);
+            }
+
+            ta.setRangeText(finalRows.join("\n"), start, end, "select");
+        }
+        function setMark(e) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            ensureSelection();
+            let currentNode = findNodeAndParentById(selectedId).node;
+            let path = computePath(currentNode.id);
+
+            if (currentNode) {
+                bookmarks.push({
+                    id: currentNode.id,
+                    caption: currentNode.title,
+                    path: path
+                });
+                showMessage(`Bookmarked: ${currentNode.title}`);
+            }
+        }
+
+        function getNodePath(node) {
+            let path = [];
+            let cur = node;
+            while (cur) {
+                path.unshift(cur.caption);
+                cur = cur.parent;
+            }
+            return path.join(" / ");
+        }
+
+
+        //---- Options ---------------------------------------------------------
+        function openOptionsDialog() {
+            optShowInitHelp.checked = showInitHelp;
+            optFileName.value = fileName;
+            optModeVim.checked = mode_vim;
+            optPort.value = nodePort;
+            optionsDialog.style.display = 'block';
+            optionIndex = 0;
+            optionFields[optionIndex].focus();
+        }
+        function closeOptionsDialog() {
+            optionsDialog.style.display = 'none';
+        }
+        function saveOptionsDialog() {
+            showInitHelp = optShowInitHelp.checked;
+            fileName = optFileName.value || fileName;
+            mode_vim = optModeVim.checked;
+            nodePort = optPort.value;
+            closeOptionsDialog();
+        }
+
+
+
+        //---- Links -----------------------------------------------------------
+        function openLinksDialog() {
+            showingLinks = true;
+            const info = findNodeAndParentById(selectedId);
+            if (!info || !info.node.content) return;
+
+            const content = safeRestoreText(info.node.content);
+            const listEl = document.getElementById('linksList');
+            listEl.innerHTML = '';
+
+            // Markdown-style links:
+            // [Label] followed directly or by whitespace/newline with (https://...) or (_Note_)
+            const markdownLinkRegex = /\[([^\]]+)\](?:[ \t]*\r?\n[ \t]*|[ \t]*)(https?:\/\/\S+|file:\/\/\S+|_[^_]+_)/gi;
+
+            // Generic standalone links
+            const urlRegex = /\b(?:https?|file):\/\/[^\s]+/gi;
+            const nodeLinkRegex = /(?:^|\s|\()_(.+?)_(?=\s|[.,!?;:)]|$)/g;
+
+            const foundLinks = [];
+            let match;
+
+            // --- Collect properly formed markdown-style links ---
+            while ((match = markdownLinkRegex.exec(content)) !== null) {
+                const label = match[1].trim();
+                const target = match[2].trim();
+                foundLinks.push({ label, target, fromMarkdown: true });
+            }
+
+            // --- Collect plain URLs not already captured ---
+            const urlMatches = content.match(urlRegex) || [];
+            for (const url of urlMatches) {
+                if (!foundLinks.some(l => l.target === url)) {
+                    foundLinks.push({ label: url, target: url });
+                }
+            }
+
+            // --- Collect underscore note links not already captured ---
+            while ((match = nodeLinkRegex.exec(content)) !== null) {
+                const title = match[1].trim().replace(/^_+|_+$/g, "");
+                const wrapped = `_${title}_`;
+                if (!foundLinks.some(l => l.target === wrapped)) {
+                    foundLinks.push({ label: title, target: wrapped });
+                }
+            }
+
+            // --- Render the collected links ---
+            if (foundLinks.length === 0) {
+                listEl.innerHTML = '<p>No links found.</p>';
+            } else {
+                for (const { label, target, fromMarkdown } of foundLinks) {
+                    const a = document.createElement('a');
+                    let displayLabel = fromMarkdown ? label : target;
+                    
+                    // If it's a wrapped note link (e.g. _Some Note_), show only the inner text
+                    if (/^_.+_$/.test(displayLabel)) {
+                        displayLabel = displayLabel.slice(1, -1);
+                    }
+                    
+                    a.textContent = displayLabel;
+
+                    if (/^(https?|file):\/\//i.test(target)) {
+                        // External URL
+                        a.href = target;
+                        a.target = '_blank';
+                    } else if (target.startsWith('_') && target.endsWith('_')) {
+                        // Note link
+                        const title = target.slice(1, -1).toLowerCase();
+                        let foundNode = null;
+
+                        (function walk(nodes) {
+                            for (const n of nodes) {
+                                if (n.title && n.title.toLowerCase() === title) {
+                                    foundNode = n;
+                                    return;
+                                }
+                                if (n.children && n.children.length) walk(n.children);
+                                if (foundNode) return;
+                            }
+                        })(treeData);
+
+                        a.href = '#';
+                        if (foundNode) {
+                            a.dataset.nodeId = foundNode.id;
+                            a.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                expandToNode(foundNode.id);
+                                selectedId = foundNode.id;
+                                closeLinksDialog();
+                                render();
+                            });
+                        } else {
+                            a.style.color = '#888';
+                            a.title = 'Node not found';
+                        }
+                    } else {
+                        // Fallback
+                        a.href = '#';
+                        a.style.color = '#888';
+                        a.title = 'Unrecognized link format';
+                    }
+
+                    listEl.appendChild(a);
+                }
+
+                const links = listEl.querySelectorAll('a');
+                linksIndex = 0;
+                if (links.length > 0) {
+                    links[linksIndex].classList.add('selected');
+                }
+            }
+
+            linksDialog.style.display = 'block';
+        }
+
+        function closeLinksDialog() {
+            showingLinks = false;
+            linksDialog.style.display = 'none';
+        }
+
+        function openHistoryDialog() {
+            showingHistory = true;
+            historyIndex = 0;
+            renderHistoryList();
+            document.getElementById('historyDialog').style.display = 'block';
+        }
+
+        function openSaveAsDialog(defaultTitle = document.title, defaultFile = fileName) {
+            const titleInput = document.getElementById('saveAsTitle');
+            const fileInput = document.getElementById('saveAsFileName');
+
+            titleInput.value = defaultTitle || '';
+            fileInput.value = defaultFile || '';
+
+            saveAsDialog.style.display = 'block';
+            titleInput.focus();
+            titleInput.select();
+
+            function closeDialog() {
+                saveAsDialog.style.display = 'none';
+                document.removeEventListener('keydown', keyHandler);
+            }
+
+            function keyHandler(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    const newTitle = titleInput.value.trim() || 'Untitled';
+                    const newFile = fileInput.value.trim() || 'untitled';
+                    fileName = newFile;
+                    document.title = newTitle;
+                    closeDialog();
+                    historyStack = [];
+                    bookmarks = [];
+                    saveAsHtml(newFile);
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeDialog();
+                }
+            }
+
+            document.addEventListener('keydown', keyHandler);
+        }
+        
+        function closeHistoryDialog() {
+            showingHistory = false;
+            document.getElementById('historyDialog').style.display = 'none';
+        }
+        
+        function renderHistoryList() {
+            const listEl = document.getElementById('historyList');
+            listEl.innerHTML = '';
+            const recent = historyStack.slice(-historyStackMax).reverse(); // latest first
+            recent.forEach((entry, i) => {
+                const div = document.createElement('div');
+                div.textContent = entry.title;
+                if (i === historyIndex) {
+                    div.classList.add('selected');
+                    div.style.background = '#444'; // ensure visible
+                    requestAnimationFrame(() => div.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+                }
+                listEl.appendChild(div);
+            });
+        }
+
+        function renderMarksList() {
+            let html = "<br><table>";
+            bookmarks.forEach((bm, i) => {
+                let sel = (i === marksIndex) ? "style='background:#444;'" : "";
+                html += `<tr ${sel}><td>${bm.caption}</td><td>${bm.path}</td></tr>`;
+            });
+            html += "</table>";
+            marksList.innerHTML = html;
+        }
+
+        function closeMarksDialog() {
+            marksDialog.style.display = "none";
+            showingMarks = false;
+        }
+
+        function closeDialogs() {
+            closeSearch();
+            closeHelpDialog();
+            closeOptionsDialog();
+            closeLinksDialog();
+            closeHistoryDialog();
+            closeMarksDialog();
+        }
+
+
+
+
+
+        //---- Finding and Replacing -------------------------------------------
+        function openReplaceDialog() {
+            finding = true;
+            document.getElementById('searchText').value = '';
+            document.getElementById('replaceText').value = '';
+            document.getElementById('replaceDialog').style.display = 'block';
+            document.getElementById('searchText').focus();
+        }
+
+        function closeReplaceDialog() {
+            finding = false;
+            document.getElementById('replaceDialog').style.display = 'none';
+        }
+
+        function doFind() {
+            const info = findNodeAndParentById(selectedId);
+            if (!info) return;
+
+            const searchVal = document.getElementById('searchText').value;
+            const resultsEl = document.getElementById('replaceResults');
+            const area = document.getElementById('editorArea');
+
+            if (!searchVal) {
+                resultsEl.textContent = 'Enter something to search for.';
+                return;
+            }
+
+            const content = safeRestoreText(info.node.content) || '';
+            // Escape user input for regex
+            const regex = new RegExp(searchVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+
+            // Create a list of match start indexes
+            findMatches = [];
+            let match;
+            while ((match = regex.exec(content)) !== null) {
+                findMatches.push({ start: match.index, end: match.index + match[0].length });
+            }
+
+            if (findMatches.length === 0) {
+                resultsEl.textContent = 'No matches found.';
+                return;
+            }
+
+            // Cycle to the next match
+            if (findIndex >= findMatches.length) findIndex = 0;
+            const current = findMatches[findIndex];
+
+            // Move the caret/selection to the match
+            area.focus();
+            area.setSelectionRange(current.start, current.end);
+
+            resultsEl.textContent = `Match ${findIndex + 1} of ${findMatches.length}`;
+            findIndex++;
+        }
+
+        function doReplaceAll() {
+            const info = findNodeAndParentById(selectedId);
+            if (!info) return;
+
+            const searchVal = document.getElementById('searchText').value;
+            const replaceVal = document.getElementById('replaceText').value;
+            const resultsEl = document.getElementById('replaceResults');
+
+            if (!searchVal) {
+                resultsEl.textContent = 'Enter something to search for.';
+                return;
+            }
+
+            const regex = new RegExp(searchVal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+            let content = safeRestoreText(info.node.content) || '';
+            const matchCount = (content.match(regex) || []).length;
+
+            if (matchCount > 0) {
+                content = content.replace(regex, replaceVal);
+                info.node.content = safeStoreText(content);
+                render();
+                resultsEl.textContent = `Replaced ${matchCount} occurrence(s).`;
+            } else {
+                resultsEl.textContent = 'No matches found.';
+            }
+
+            syncFile();
+        }
+
+        const searchInputEl = document.getElementById('searchText');
+        const replaceInputEl = document.getElementById('replaceText');
+
+        replaceInputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                doReplaceAll(); // replaces all
+                closeReplaceDialog();
+            }
+        });
+
+
+
+
+
+
+
+        //---- Copy / Paste ----------------------------------------------------
+        function copyNode() {
+            if (readOnly) return;
+            const info = findNodeAndParentById(selectedId);
+            if (info && !isFolder(info.node)) {
+                copiedNoteId = info.node.id;
+            } else {
+                copiedNoteId = null;
+            }
+        }
+
+        function pasteNode() {
+            if (readOnly) return;
+            if (copiedNoteId) {
+                const info = findNodeAndParentById(selectedId);
+                if (info && isFolder(info.node)) {
+                    const original = findNodeAndParentById(copiedNoteId)?.node;
+                    if (original) {
+                        // Deep clone the note (new ID)
+                        const cloneNode = JSON.parse(JSON.stringify(original));
+                        cloneNode.id = makeId();
+                        // Recursively assign new IDs to all children
+                        (function fixIds(n) {
+                            n.id = makeId();
+                            n.children.forEach(fixIds);
+                        })(cloneNode);
+                        info.node.children.push(cloneNode);
+                        info.node.expanded = true;
+                        selectedId = cloneNode.id;
+                    }
+                }
+            }
+        }
+
+
+
+        //---- Undo / Redo -----------------------------------------------------
+        function doUndo() {
+            editorArea.value = undoValue;
+            syncFile();
+        }
+
+
+
+        //---- Visual Mode Helpers ---------------------------------------------
+        function enterVisualMode(lineMode = false) {
+            mode_visual = true;
+            mode_visual_line = lineMode;
+            visual_start = editorArea.selectionStart;
+            visual_end = editorArea.selectionStart;
+            modeEl.textContent = 'VISUAL';
+            updateVisualSelection();
+        }
+        
+        function exitVisualMode() {
+            mode_visual = false;
+            mode_visual_line = false;
+            // Position cursor at the end of the selection
+            let cursorPos = Math.max(visual_start, visual_end);
+
+            if (visual_end < visual_start) {
+                cursorPos = Math.min(visual_start, visual_end);
+            }
+
+            editorArea.selectionStart = editorArea.selectionEnd = cursorPos;
+            visual_start = 0;
+            visual_end = 0;
+            modeEl.textContent = 'NORMAL';
+        }
+        
+        function updateVisualSelection() {
+            if (!mode_visual) return;
+            
+            let start = Math.min(visual_start, visual_end);
+            let end = Math.max(visual_start, visual_end);
+            
+            if (mode_visual_line) {
+                // Extend to full lines
+                const text = editorArea.value;
+                const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+                const lineEndPos = text.indexOf('\n', end);
+                const lineEnd = lineEndPos === -1 ? text.length : lineEndPos + 1;
+                start = lineStart;
+                end = lineEnd;
+            } else {
+                // Character-wise - include character at cursor
+                // if (end < editorArea.value.length) end += 1;
+            }
+            
+            editorArea.setSelectionRange(start, end);
+        }
+
+        function getVisualSelection() {
+            if (!mode_visual) return '';
+            
+            let start = Math.min(visual_start, visual_end);
+            let end = Math.max(visual_start, visual_end);
+            
+            if (mode_visual_line) {
+                const text = editorArea.value;
+                const lineStart = text.lastIndexOf('\n', start - 1) + 1;
+                const lineEndPos = text.indexOf('\n', end);
+                const lineEnd = lineEndPos === -1 ? text.length : lineEndPos + 1;
+                return text.substring(lineStart, lineEnd);
+            } else {
+                if (end < editorArea.value.length) end += 1;
+                return editorArea.value.substring(start, end);
+            }
+        }
+        
+        function deleteVisualSelection() {
+            // Similar logic to getVisualSelection but deletes the text
+            // and exits visual mode
+        }
+
+        function doVisualDelete(e) {
+            e.stopPropagation();
+            let start = Math.min(visual_start, visual_end);
+            let end = Math.max(visual_start, visual_end);
+        
+            if (mode_visual_line) {
+                // Full line delete
+                const text = editorArea.value;
+                const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+                const lineEndPos = text.indexOf("\n", end);
+                const lineEnd = lineEndPos === -1 ? text.length : lineEndPos + 1;
+                editorArea.setRangeText("", lineStart, lineEnd, "start");
+                editorArea.selectionStart = editorArea.selectionEnd = lineStart;
+            } else {
+                const deletedLength = end - start;
+                visual_end = visual_start;
+                editorArea.setRangeText("", start, end, "start");
+                editorArea.selectionStart = editorArea.selectionEnd = start;
+            }
+        
+            syncFile();
+            exitVisualMode();
+        }
+
+
+
+        //---- Search ----------------------------------------------------------
+        function openSearch() {
+            searchActive = true;
+            searchDialog.style.display = 'flex';
+            searchInput.value = '';
+            searchInput.focus();
+            searchMatches = [];
+            searchIndex = 0;
+            renderSearchList();
+        }
+
+        function closeSearch() {
+            searchActive = false;
+            searchDialog.style.display = 'none';
+        }
+
+        function searchTree(query) {
+            searchMatches = [];
+            const matchContent = !query.startsWith(':');
+            const q = query.startsWith(':') ? query.slice(1).toLowerCase() : query.toLowerCase();
+            (function walk(nodes) {
+                for (const n of nodes) {
+                    if ((n.title && n.title.toLowerCase().includes(q)) || (matchContent && n.content && n.content.toLowerCase().includes(q))) {
+                        searchMatches.push(n);
+                    }
+                    if (n.children && n.children.length) walk(n.children);
+                }
+            })(treeData);
+            searchIndex = 0;
+            renderSearchList();
+        }
+
+        function renderSearchList() {
+            searchList.innerHTML = '';
+            searchMatches.forEach((n, i) => {
+                const item = document.createElement('div');
+                item.textContent = n.title || '(untitled)';
+                if (i === searchIndex) {
+                    item.classList.add('selected');
+                    requestAnimationFrame(() => item.scrollIntoView({ block: "nearest", behavior: "smooth" }));
+                }
+                item.addEventListener('click', () => {
+                    if (searchMatches.length > 0) {
+                        selectSearchResult(i);
+                        closeSearch();
+                    }
+                });
+                searchList.appendChild(item);
+            });
+            if (searchMatches.length === 0) {
+                const empty = document.createElement('div');
+                empty.textContent = '(no matching nodes)';
+                empty.style.color = '#888';
+                searchList.appendChild(empty);
+            }
+        }
+
+        function selectSearchResult(i) {
+            if (i < 0 || i >= searchMatches.length) return;
+            searchIndex = i;
+            expandToNode(searchMatches[i].id);
+            selectedId = searchMatches[i].id;
+            render();
+            renderSearchList();
+        }
+
+        function expandToNode(id) {
+            let info = findNodeAndParentById(id);
+            while (info && info.parent) {
+                info.parent.expanded = true;
+                info = findNodeAndParentById(info.parent.id);
+            }
+        }
+
+        searchInput.addEventListener('input', e => {
+            searchTree(e.target.value);
+        });
+
+        searchInput.addEventListener('keydown', e => {
+            if (e.key === 'ArrowDown') {
+                searchIndex = Math.min(searchIndex + 1, searchMatches.length - 1);
+                renderSearchList();
+                e.preventDefault();
+            } else if (e.key === 'ArrowUp') {
+                searchIndex = Math.max(searchIndex - 1, 0);
+                renderSearchList();
+                e.preventDefault();
+            } else if (e.key === 'Enter') {
+                if (searchMatches.length > 0) {
+                    selectSearchResult(searchIndex);
+                    closeSearch();
+                }
+            } else if (e.key === 'Escape') {
+                closeSearch();
+            }
+        });
+
+
+
+
+        //---- Help ------------------------------------------------------------
+        function openHelpDialog(mode) {
+            showingHelp = true;
+            const dialog = document.getElementById('helpDialogUnified');
+            const input = document.getElementById('helpFilter');
+            const results = document.getElementById('helpResults');
+            
+            // pick which dataset to use
+            let data;
+            if (mode === 'ReadOnly') data = helpReadOnly;
+            else if (mode === 'VimEnabled') data = helpVimEnabled;
+            else data = helpVimDisabled;
+        
+            // --- Normalize comparison function ---
+            function matches(h, term) {
+                let t = term.trim().replace(/\s+/g, '').toLowerCase();
+                let key = h.key.replace(/\s+/g, '').toLowerCase();
+                let mode = "";
+                if (mode != "ReadOnly") {
+                    mode = mode.toLowerCase();
+                } else {
+                    mode = "";
+                }
+                let desc = h.description.toLowerCase();
+            
+                // If the search starts with ":", search keys only
+                if (t.startsWith(':')) {
+                    t = t.slice(1); // remove ':'
+                    mode = '';
+                    desc = '';
+                }
+            
+                return key.includes(t) || mode.includes(t) || desc.includes(t);
+            }
+        
+            // --- Rendering function ---
+            function renderList(list) {
+                if (list.length === 0) {
+                    results.innerHTML = `<div style="opacity:0.6;">No matches found</div>`;
+                    return;
+                }
+                results.innerHTML = list
+                    .map(h => {
+                        const modeSuffix = h.mode && h.mode.trim() !== "" ? ` <span class="dim">(${escapeHtml(h.mode)}) - </span>` : "";
+                        return `<div><b>${escapeHtml(h.key)}</b>${modeSuffix}${escapeHtml(h.description)}</div>`;
+                    })
+                    .join('');
+            }
+        
+            // --- Escape HTML for safety ---
+            function escapeHtml(str) {
+                if (str === undefined) return "";
+                if (str === "") return str;
+
+                return str.replace(/[&<>"']/g, c => ({
+                    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+                }[c]));
+            }
+        
+            // --- Show dialog ---
+            dialog.style.display = 'flex';
+            input.value = '';
+            input.focus();
+            renderList(data);
+        
+            // --- Filter on input ---
+            input.oninput = () => {
+                const term = input.value.trim();
+                if (!term) return renderList(data);
+                renderList(data.filter(h => matches(h, term)));
+            };
+        }
+        
+        function closeHelpDialog() {
+            showingHelp = false;
+            document.getElementById('helpDialogUnified').style.display = 'none';
+        }
+
+
+
+
+        //---- Saving ----------------------------------------------------------
+        function getContents(name, saveName) {
+            const elemLimit = 20; // Number of elements per line
+            const htmlDoc = document.documentElement.cloneNode(true);
+
+            // Make sure the latest database is stored
+            const latestDatabase = JSON.parse(JSON.stringify(treeData));
+
+            const lines = [];
+            for (let i = 0; i < latestDatabase.length; i += elemLimit) {
+                let chunk = latestDatabase.slice(i, i + elemLimit);
+                lines.push(JSON.stringify(chunk).slice(1, -1)); // Strip [ and ]
+            }
+            let formattedDatabase = `[\n  ${lines.join(",\n  ")}\n]`;
+
+            // Ensure correct replacement of the old database
+            let htmlContent = "<!DOCTYPE html>" + htmlDoc.outerHTML;
+            if (saveName) {
+                htmlContent = htmlContent.replace(/let\s+fileName\s*=\s*"([^"]*)";/, `let fileName = "${name}";`);
+            } else {
+                // fileName
+                htmlContent = htmlContent.replace(
+                  /let\s+fileName\s*=\s*"([^"]*)";/,
+                  `let fileName = "${fileName}";`
+                );
+            }
+
+            // showInitHelp
+            htmlContent = htmlContent.replace(
+              /let\s+showInitHelp\s*=\s*(true|false);/,
+              `let showInitHelp = ${showInitHelp};`
+            );
+            
+            // mode_vim
+            htmlContent = htmlContent.replace(
+              /let\s+mode_vim\s*=\s*(true|false);/,
+              `let mode_vim = ${mode_vim};`
+            );
+
+            // nodePort
+            htmlContent = htmlContent.replace(
+                /let\s+nodePort\s*=\s*\d+;/,
+                `let nodePort = ${nodePort};`
+            );
+
+            htmlContent = htmlContent.replace(/let\s+treeData\s*=\s*\[[\s\S]*?\];/, `let treeData = ${formattedDatabase};`);
+
+            htmlContent = htmlContent.replace(
+                /let\s+bookmarks\s*=\s*\[[\s\S]*?\];/,
+                "let bookmarks = " + JSON.stringify(bookmarks, null, 4) + ";"
+            );
+            htmlContent = htmlContent.replace(
+                /let\s+historyStack\s*=\s*\[[\s\S]*?\];/,
+                "let historyStack = " + JSON.stringify(historyStack, null, 4) + ";"
+            );
+
+            return htmlContent;
+        }
+
+
+        function saveAsHtml(currentFileName) {
+            let name = currentFileName;
+            let saveName = false;
+            if (name === "") {
+                name = prompt("Save as .html (enter name without extension):", "");
+                if (!name) return;
+                saveName = true;
+            }
+
+            let htmlContent = getContents(name, saveName);
+
+            let blob = new Blob([htmlContent], { type: "text/html" });
+            let a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `${name}.html`;
+            a.click();
+        }
+
+        async function saveViaNode() {
+            const content = getContents(fileName, false);
+
+            const res = await fetch("http://localhost:"+nodePort+"/save", {
+                method: "POST",
+                headers: { "Content-Type": "text/plain" },
+                body: content
+            });
+
+            if (res.ok) {
+                showMessage("Saved successfully");
+            } else {
+                showMessage("Save failed: " + (await res.text()));
+            }
+        }
+
+        function exportNoteAsTxt() {
+            const editorArea = document.getElementById("editorArea");
+            if (!editorArea || editorArea.value === "") return;
+
+            let content = editorArea.value;
+
+            // Regex that preserves whitespace and line breaks around inter-note links
+            const nodeLinkRegex = /(^|\s)_(.+?)_(?=\s|[.,!?;:)]|$)/g;
+            content = content.replace(nodeLinkRegex, (match, leading, inner) => {
+                return (leading || "") + inner; // keep whitespace/line breaks, drop underscores
+            });
+
+            // Ask for filename (no extension needed)
+            const name = prompt("Save note as .txt (enter name without extension):", "");
+            if (!name) return;
+
+            const fileName = name + ".txt";
+
+            // Create and trigger download
+            const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+
+        //---- Key Handling ----------------------------------------------------
+        function handleGlobalKey(e){
+            if (editing) {
+                // Check if Ctrl (or Command on Mac) is held and the "-" key is pressed
+                if ((e.ctrlKey || e.metaKey) && (e.key === "-" || e.code === "Minus")) {
+                    e.preventDefault(); // optional: prevents browser zoom-out
+                    insertHr();
+                    return;
+                }
+
+                if ((e.ctrlKey || e.metaKey) && (e.key === "\\" || e.code === "Backslash")) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    wrapSelection();
+                    return;
+                }
+
+                if (e.ctrlKey && e.key === ";") {
+                    e.preventDefault();
+                    formatMarkdownTable();
+                }
+
+                return;
+            }
+
+            if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+            if (finding) {
+                switch (e.key) {
+                    case 'Escape':
+                        closeReplaceDialog();
+                        break;
+
+                    case "Enter":
+                        doFind();
+                        break;
+                }
+
+                return;
+            }
+
+            if (e.key === '/' && !editing && !dialogOpen()) {
+                openSearch();
+                e.preventDefault();
+                return;
+            }
+
+            if (searchActive || showingHelp) return;
+
+            const k = e.key; // compare exact letter; do not rely on shift state
+            let did = true;
+
+            if (dialogOpen()) {
+                return;
+            }
+
+            switch (k) {
+                case 'i':
+                    if (!readOnly) {
+                        e.preventDefault();
+                        const info = findNodeAndParentById(selectedId); if (!info) return;
+                        editing = true; render();
+                        editorArea.focus();
+                        editorArea.setSelectionRange(0, 0); 
+                        scrollToCursor();
+                        addUndo();
+                        if (mode_vim) {
+                            setVimMode(false);
+                            return;
+                        } else {
+                            setVimMode(true);
+                            return;
+                        }
+                    }
+                    break;
+                case 'I':
+                    if (!readOnly) {
+                        e.preventDefault();
+                        addUndo();
+                        const info = findNodeAndParentById(selectedId); if (!info) return;
+                        editing = true; render();
+                        editorArea.focus();
+                        editorArea.setSelectionRange(0, 0); 
+                        scrollToCursor();
+                        setVimMode(true);
+                        return;
+                    }
+                    break;
+                case 'Escape':
+                    if (showingLinks) {
+                        closeLinksDialog();
+                        e.preventDefault();
+                    }
+                    else {
+                        did = false;
+                    }
+                    break; // handled in textarea
+                case 'f': if (!editing) openReplaceDialog(); break;
+                case 'r': if (!readOnly) addRoot(); break;
+                case 'R': if (!readOnly) renameFolder(); break;
+                case 'j': if (!dialogOpen()) selectNextSibling(true); break;
+                case 'k': if (!dialogOpen()) selectPrevSibling(false); break;
+                case ',': selectNextSibling(true); break;
+                case '.': selectPrevSibling(true); break;
+                case 'l': moveRight(); break;
+                case 'h': moveLeft(true); break;
+                case 'u': moveLeft(false); break;
+                case 'C': collapseAll(); break;
+                case 'E': expandAll(); break;
+                case 'g': gotoTop(); break;
+                case 'G': gotoBottom(); break;
+                case 'A': addChild(); break;
+                case 'a': addAfter(); break;
+                case 'H': moveOutToParent(); break;
+                case 'L': moveIntoAsChild(); break;
+                case 'J': reorderAmongSiblings('down'); break;
+                case 'K': reorderAmongSiblings('up'); break;
+                case 'D': deleteNode(); break;
+                case 's': saveAsHtml(fileName); break;
+                case 'S': openSaveAsDialog(); break;
+                case 'n': saveViaNode(); break;
+                case 'T': exportNoteAsTxt(); break;
+                case ']': resizeTree(30); break;
+                case '[': resizeTree(-30); break;
+                case '#': openLinksDialog(); break;
+                case 'm': setMark(e); break;
+                case '`': openMarksDialog(); break;
+                case 'X': openMissingLinksDialog(); break;
+                case 'y': copyNode(); break;
+                case 'p': pasteNode(); break;
+                case '<':
+                    openHistoryDialog();
+                    e.preventDefault();
+                    return;
+                default: did = false; break;
+            }
+            if (did) { e.preventDefault(); render(); }
+        }
+
+        document.addEventListener('keydown', e => {
+            if (e.key === '?' && !editing && !dialogOpen()) {
+                e.preventDefault();
+                if (readOnly) openHelpDialog('ReadOnly');
+                else if (mode_vim) openHelpDialog('VimEnabled');
+                else openHelpDialog('VimDisabled');
+                return;
+            }
+            if (optionsDialog.style.display === 'block') {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveOptionsDialog();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeOptionsDialog();
+                } else if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    optionIndex = (optionIndex + 1) % optionFields.length;
+                    optionFields[optionIndex].focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    optionIndex = (optionIndex - 1 + optionFields.length) % optionFields.length;
+                    optionFields[optionIndex].focus();
+                } else if (e.key === ' ') {
+                    // Toggle checkbox if that's the active element
+                    if (document.activeElement.type === 'checkbox') {
+                        e.preventDefault();
+                        document.activeElement.checked = !document.activeElement.checked;
+                    }
+                }
+            } else if (e.key === '!' && !editing && !readOnly && !dialogOpen()) {
+                e.preventDefault();
+                openOptionsDialog();
+            }
+            if (e.key === 'U' && !editing && !dialogOpen()) {
+                document.getElementById('filePicker').click()
+            }
+
+            if (e.key === 'Escape') {
+                repeatCount = 1;
+
+                if (showingHelp) {
+                    closeHelpDialog();
+                    e.stopPropagation();
+                    return;
+                }
+            }
+        });
+
+        window.addEventListener('keydown', handleGlobalKey, { capture: true });
+
+        function escapeForScript(json){
+            return json.replace(/<\//g, '<\\/'); // avoid closing script tags
+        }
+
+        function dialogActive() {
+
+        }
+
+    let linksIndex = 0;
+    let linksCount = 0;
+
+    function openMissingLinksDialog() {
+        if (readOnly) return;
+        showingLinks = true;
+        const nodeLinkRegex = /(?:^|\s)_(.+?)_(?=\s|[.,!?;:)]|$)/g;
+
+        // Gather all node titles (case-insensitive)
+        const allTitles = new Set();
+        (function walkTitles(nodes) {
+            for (const n of nodes) {
+                if (n.title) {
+                    allTitles.add(n.title.trim().toLowerCase());
+                }
+                if (n.children && n.children.length) walkTitles(n.children);
+            }
+        })(treeData);
+
+        // Map of missingLink → set of nodes that reference it
+        const missingMap = new Map();
+
+        (function walk(nodes) {
+            for (const n of nodes) {
+                if (n.content) {
+                    let seenInThisNode = new Set(); // avoid dupes within the same note
+                    let match;
+                    while ((match = nodeLinkRegex.exec(n.content)) !== null) {
+                        const linkTitle = match[1].trim();
+                        if (!allTitles.has(linkTitle.toLowerCase())) {
+                            if (!seenInThisNode.has(linkTitle.toLowerCase())) {
+                                if (!missingMap.has(linkTitle)) {
+                                    missingMap.set(linkTitle, []);
+                                }
+                                missingMap.get(linkTitle).push({
+                                    nodeId: n.id,
+                                    nodeTitle: n.title || '(untitled)'
+                                });
+                                seenInThisNode.add(linkTitle.toLowerCase());
+                            }
+                        }
+                    }
+                }
+                if (n.children && n.children.length) walk(n.children);
+            }
+        })(treeData);
+
+        const listEl = document.getElementById('linksList');
+        listEl.innerHTML = '';
+
+        if (missingMap.size === 0) {
+            listEl.innerHTML = '<p>No missing links found</p>';
+        } else {
+            listEl.innerHTML = '<p>Missing Links:</p>';
+            for (const [missingTitle, refs] of missingMap.entries()) {
+                refs.forEach(ref => {
+                    const container = document.createElement('div');
+
+                    const link = document.createElement('a');
+                    link.href = '#';
+                    link.textContent = `"${missingTitle}" — linked from: ${ref.nodeTitle}`;
+                    link.style.color = '#888';
+                    link.title = 'Missing link — click to go to note';
+
+                    // Clicking takes you to the referencing note
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        expandToNode(ref.nodeId);
+                        selectedId = ref.nodeId;
+                        closeLinksDialog();
+                        render();
+                    });
+
+                    container.appendChild(link);
+                    listEl.appendChild(container);
+                });
+            }
+        }
+
+        linksDialog.style.display = 'block';
+    }
+
+    function openMarksDialog() {
+        if (bookmarks.length === 0) {
+            alert("No bookmarks yet.");
+            return;
+        }
+
+        marksIndex = 0;
+    
+        function render() {
+            let html = "<br><table>";
+            bookmarks.forEach((bm, i) => {
+                let sel = (i === marksIndex) ? "style='background:#444;'" : "";
+                html += `<tr ${sel}><td>${bm.caption}</td><td>${bm.path}</td></tr>`;
+            });
+            html += "</table>";
+            marksList.innerHTML = html;
+        }
+    
+        showingMarks = true;
+        marksDialog.style.display = "block";
+        render();
+    }
+
+    function activateSelectedLink() {
+        const listEl = document.getElementById('linksList');
+        const links = listEl.querySelectorAll('a');
+        if (linksIndex < 0 || linksIndex >= links.length) return;
+        const link = links[linksIndex];
+        if (link.dataset.nodeId) {
+            expandToNode(link.dataset.nodeId);
+            selectedId = link.dataset.nodeId;
+            closeLinksDialog();
+            render();
+        } else {
+            link.click();
+        }
+    }
+
+    function handleLinksKey(e) {
+        if (!showingLinks) return;
+        const listEl = document.getElementById('linksList');
+        const links = listEl.querySelectorAll('a');
+
+        if (e.key === 'ArrowDown' || e.key === 'j') {
+            if (links.length === 0) return;
+            links[linksIndex].classList.remove('selected');
+            linksIndex = (linksIndex + 1) % links.length;
+            links[linksIndex].classList.add('selected');
+            e.preventDefault();
+        } else if (e.key === 'ArrowUp' || e.key === 'k') {
+            if (links.length === 0) return;
+            links[linksIndex].classList.remove('selected');
+            linksIndex = (linksIndex - 1 + links.length) % links.length;
+            links[linksIndex].classList.add('selected');
+            e.preventDefault();
+        } else if (e.key === 'Enter') {
+            if (links.length === 0) return;
+            activateSelectedLink();
+            e.preventDefault();
+        } else if (e.key === 'Escape') {
+            closeLinksDialog();
+            e.preventDefault();
+        }
+    }
+
+    function handleMarksKey(e) {
+        if (!showingMarks) return;
+
+        if (e.key === "ArrowDown" || e.key === 'j') {
+            marksIndex = (marksIndex + 1) % bookmarks.length;
+            renderMarksList();
+            e.preventDefault();
+        } else if (e.key === "ArrowUp" || e.key === 'k') {
+            marksIndex = (marksIndex - 1 + bookmarks.length) % bookmarks.length;
+            renderMarksList();
+            e.preventDefault();
+        } else if (e.key === "d") {
+            // Delete selected bookmark
+            bookmarks.splice(marksIndex, 1);
+            if (marksIndex >= bookmarks.length) marksIndex = bookmarks.length - 1;
+            if (bookmarks.length === 0) {
+                closeMarksDialog();
+            } else {
+                renderMarksList();
+            }
+            e.preventDefault();
+        } else if (e.key === "Enter") {
+            let bm = bookmarks[marksIndex];
+            // let node = findNode(bm.id);
+            if (bm) {
+                expandToNode(bm.id);
+                selectedId = bm.id;
+                closeMarksDialog();
+                render();
+            }
+        } else if (e.key === "Escape") {
+            closeMarksDialog();
+        }
+    }
+
+    function handleHistoryKey(e) {
+        if (!showingHistory) return;
+        if (e.key === 'ArrowDown' || e.key === 'j') {
+            historyIndex = Math.min(historyIndex + 1, Math.min(historyStackMax, historyStack.length - 1));
+            renderHistoryList();
+            e.preventDefault();
+        } else if (e.key === 'ArrowUp' || e.key === 'k') {
+            historyIndex = Math.max(historyIndex - 1, 0);
+            renderHistoryList();
+            e.preventDefault();
+        } else if (e.key === 'Enter') {
+            const recent = historyStack.slice(-15).reverse();
+            if (recent[historyIndex]) {
+                expandToNode(recent[historyIndex].id);
+                selectedId = recent[historyIndex].id;
+                closeHistoryDialog();
+                render();
+            }
+            e.preventDefault();
+        } else if (e.key === 'Escape' || e.key === 'q') {
+            closeHistoryDialog();
+            e.preventDefault();
+        }
+        return;
+    }
+
+    function dialogOpen() {
+        let openDialog = false;
+
+        if (showingHelp) {
+            openDialog = true;
+        }
+        if (optionsDialog.style.display === "block") {
+            openDialog = true;
+        }
+        if (searchDialog.style.display === "flex") {
+            openDialog = true;
+        }
+        if (replaceDialog.style.display === "block") {
+            openDialog = true;
+        }
+        if (linksDialog.style.display === "block") {
+            openDialog = true;
+        }
+        if (marksDialog.style.display === "block") {
+            openDialog = true;
+        }
+        if (historyDialog.style.display === "block") {
+            openDialog = true;
+        }
+        if (saveAsDialog.style.display === "block") {
+            openDialog = true;
+        }
+
+        return openDialog;
+    }
+
+    function vimEditDialogOpen() {
+        let openDialog = false;
+
+        if (helpDialog.style.display === "block") {
+            openDialog = true;
+        }
+
+        return openDialog;
+    }
+
+
+
+    document.getElementById("filePicker").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) {
+            file.text().then(content => {
+                const match = content.match(/let\s+treeData\s*=\s*(\[[\s\S]*?\]);/);
+                if (!match) {
+                    alert("No treeData found in selected file.");
+                    return;
+                }
+
+                try {
+                    const importedTreeData = JSON.parse(match[1]);
+
+                    // Replace current in-memory treeData
+                    treeData = importedTreeData;
+
+                    selectedId = treeData[0]?.id || null;
+
+                    // Re-render with new data
+                    render();
+                } catch (err) {
+                    console.error("Failed to parse treeData:", err);
+                    alert("Error parsing treeData.");
+                }
+            });
+        }
+    });
+
+
+    //---- Modile UI -----------------------------------------------------------
+    function toggleMobileMenu() {
+        if (mobileMenu.style.display === "none") {
+            mobileMenu.style.display = "block";
+            mode_vim = false;
+        } else {
+            mobileMenu.style.display = "none";
+        }
+    }
+    function updateHamburger() {
+      if (window.innerWidth <= 768) {
+        mobileMenu.style.display = 'block';
+        hamburgerBtn.style.display = 'inline-block';
+      } else {
+        mobileMenu.style.display = 'none';
+        hamburgerBtn.style.display = 'none';
+        treeEl.classList.remove('show');
+      }
+    }
+    window.addEventListener('resize', updateHamburger);
+    updateHamburger();
+    
+    // Toggle treeview on hamburger click
+    hamburgerBtn.addEventListener('click', () => {
+      treeEl.classList.toggle('show');
+    });
+    
+    // Hide tree when clicking editor
+    editorArea.addEventListener('click', () => {
+      if (window.innerWidth <= 768) {
+        treeEl.classList.remove('show');
+      }
+    });
+
+    const treeDialog = document.getElementById('treeDialog');
+    const collapseBtn = document.getElementById('collapseBtn');
+    const addNodeBtn = document.getElementById('addNodeBtn');
+    const addChildBtn = document.getElementById('addChildBtn');
+    const renameNodeBtn = document.getElementById('renameNodeBtn');
+    const deleteNodeBtn = document.getElementById('deleteNodeBtn');
+    const closeDialogBtn = document.getElementById('closeDialogBtn');
+    const treeCol2 = document.getElementById('treeCol2');
+    
+    function openTreeDialog() {
+        treeDialog.style.display = 'block';
+        mode_vim = false;
+
+        if (readOnly) {
+            addNodeBtn.style.display = "none";
+            addChildBtn.style.display = "none";
+            renameNodeBtn.style.display = "none";
+            deleteNodeBtn.style.display = "none";
+            treeCol2.style.display = "none";
+        }
+
+        activateTree();
+    }
+    function closeTreeDialog() {
+        treeDialog.style.display = 'none';
+    }
+    
+    // Hook buttons
+    collapseBtn.addEventListener('click', () => {
+        closeTreeDialog();
+        collapseAll();
+        render();
+    });
+    addNodeBtn.addEventListener('click', () => {
+        closeTreeDialog();
+        if (treeData.length < 1) {
+            addRoot();
+        } else {
+            addAfter();
+        }
+        render();
+    });
+    addChildBtn.addEventListener('click', () => {
+        closeTreeDialog();
+        addChild();
+        render();
+    });
+    renameNodeBtn.addEventListener('click', () => {
+        closeTreeDialog();
+        if (!readOnly) renameFolder();
+        render();
+    });
+    deleteNodeBtn.addEventListener('click', () => {
+        closeTreeDialog();
+        if (!readOnly) deleteNode();
+        render();
+    });
+    closeDialogBtn.addEventListener('click', closeTreeDialog);
+    
+    // --- Triggering logic ---
+    let longPressTimer = null;
+    
+    // Double-click anywhere on tree panel
+    treeEl.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        openTreeDialog();
+    });
+    
+    // Long press (for mobile)
+    treeEl.addEventListener('touchstart', () => {
+        longPressTimer = setTimeout(() => {
+            openTreeDialog();
+        }, 600); // 600ms = long press
+    });
+    treeEl.addEventListener('touchend', () => {
+        clearTimeout(longPressTimer);
+    });
+
+
+
+
+    window.addEventListener('keydown', handleHistoryKey, { capture: true });
+    window.addEventListener('keydown', handleLinksKey, { capture: true });
+    window.addEventListener('keydown', handleMarksKey, { capture: true });
+
+
+
+
+    //---- Mobile Sizing -------------------------------------------------------
+    function isMobile() {
+        return /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    }
+    function setAppHeight() {
+        document.documentElement.style.setProperty('--app-height', `${window.innerHeight}px`);
+    }
+    setAppHeight();
+    window.addEventListener('resize', setAppHeight);
+
+    editorArea.addEventListener('focus', () => {
+        if (isMobile()) {
+            document.querySelector('.app').style.height = `60dvh`;
+            // document.querySelector('.app').style.height = `${window.innerHeight-400}px`;
+            // setTimeout(() => window.scrollTo(0, 0), 50);
+        }
+    });
+    
+    editorArea.addEventListener('blur', () => {
+        if (isMobile()) {
+            document.querySelector('.app').style.height = '100dvh';
+            setTimeout(setAppHeight, 100);
+        }
+    });
+
+
+
+
+    //---- Init ------------------------------------------------------------
+    window.addEventListener('load', function() {
+        if (showInitHelp) {
+            if (readOnly) openHelpDialog('ReadOnly');
+            else if (mode_vim) openHelpDialog('VimEnabled');
+            else openHelpDialog('VimDisabled');
+        }
+
+        selectedId = treeData[0]?.id || null;
+        render();
+    });
+
+
+    //---- Node AutoSaver ------------------------------------------------------
+    let autoSaveTimer = null;
+
+    function scheduleAutoSave() {
+        if (nodePort == 0) return;
+        if (!mode_insert) return;
+
+        clearTimeout(autoSaveTimer);
+        autoSaveTimer = setTimeout(() => {
+        saveViaNode();
+        }, 3000);                               // wait 3s after last change
+    }
+</script>
+
+
+
+
+
+</body></html>

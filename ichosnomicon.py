@@ -14,6 +14,13 @@ try:
 except ImportError:
     MUTAGEN_AVAILABLE = False
 
+try:
+    import pygame
+    pygame.mixer.init()
+    PYGAME_AVAILABLE = True
+except ImportError:
+    PYGAME_AVAILABLE = False
+
 class MusicPlaylistManager:
     def __init__(self, root):
         self.root = root
@@ -25,6 +32,14 @@ class MusicPlaylistManager:
         
         # Bind Ctrl+Q to quit application
         self.root.bind('<Control-q>', lambda e: self.quit_app())
+        
+        # Audio playback state
+        self.currently_playing = None
+        self.is_playing = False
+        self.current_volume = 0.7
+        self.song_length = 0
+        self.is_seeking = False  # Flag to prevent update loop during manual seek
+        self.song_start_time = 0  # Track when song started for accurate positioning
         
         # App directory - use script location even when frozen by PyInstaller
         if getattr(sys, 'frozen', False):
@@ -147,6 +162,8 @@ class MusicPlaylistManager:
     
     def quit_app(self):
         """Cleanly close the application"""
+        if PYGAME_AVAILABLE and self.is_playing:
+            pygame.mixer.music.stop()
         if self.conn:
             self.conn.close()
         self.root.quit()
@@ -198,9 +215,20 @@ class MusicPlaylistManager:
     def load_config(self):
         """Load configuration including music root directory"""
         if self.config_path.exists():
-            with open(self.config_path, 'r') as f:
-                config = json.load(f)
-                self.music_root = config.get('music_root')
+            try:
+                with open(self.config_path, 'r') as f:
+                    config = json.load(f)
+                    self.music_root = config.get('music_root')
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"Warning: Could not load config file: {e}")
+                print("Creating new config file...")
+                # Optionally backup the corrupted file
+                if self.config_path.exists():
+                    backup_path = self.config_path.with_suffix('.json.backup')
+                    shutil.copy(self.config_path, backup_path)
+                    print(f"Backed up corrupted config to: {backup_path}")
+                # Initialize with default values
+                self.music_root = None
                 
     def save_config(self):
         """Save configuration"""
@@ -235,6 +263,45 @@ class MusicPlaylistManager:
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog,
                    style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+        
+        # Play button
+        self.play_button = ttk.Button(top_frame, text="▶ Play", 
+                                      command=self.toggle_playback)
+        self.play_button.pack(side=tk.LEFT, padx=5)
+        
+        self.now_playing_label = ttk.Label(top_frame, text="", 
+                                           foreground=self.colors['accent'])
+        self.now_playing_label.pack(side=tk.LEFT, padx=10)
+
+        # Seek bar
+        self.seek_slider = ttk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                     length=300, command=self.on_seek)
+        self.seek_slider.pack(side=tk.LEFT, padx=5)
+        self.seek_slider.config(state='disabled')
+
+        # Time labels
+        self.time_label = ttk.Label(top_frame, text="0:00 / 0:00", width=12)
+        self.time_label.pack(side=tk.LEFT, padx=5)
+
+        self.now_playing_label = ttk.Label(top_frame, text="", 
+                                           foreground=self.colors['accent'])
+        self.now_playing_label.pack(side=tk.LEFT, padx=10)
+
+        # Volume control
+        ttk.Label(top_frame, text="Volume:").pack(side=tk.LEFT, padx=(10, 5))
+
+        self.volume_label = ttk.Label(top_frame, text=f"{int(self.current_volume * 100)}%",
+                                       width=4)
+        self.volume_slider = ttk.Scale(top_frame, from_=0, to=100, orient=tk.HORIZONTAL,
+                                        length=100, command=self.on_volume_change)
+        self.volume_slider.set(self.current_volume * 100)
+        self.volume_slider.pack(side=tk.LEFT, padx=5)
+
+        self.volume_label.pack(side=tk.LEFT)
+
+        self.now_playing_label = ttk.Label(top_frame, text="", 
+                                           foreground=self.colors['accent'])
+        self.now_playing_label.pack(side=tk.LEFT, padx=10)
         
         # Main frame
         main_frame = ttk.Frame(self.root)
@@ -272,6 +339,12 @@ class MusicPlaylistManager:
         self.album_filter_var.trace('w', lambda *args: self.update_library_list())
         album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
         album_filter_entry.pack(side=tk.LEFT)
+
+        ttk.Label(search_frame, text="Path:").pack(side=tk.LEFT, padx=(20, 5))
+        self.path_filter_var = tk.StringVar()
+        self.path_filter_var.trace('w', lambda *args: self.update_library_list())
+        path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
+        path_filter_entry.pack(side=tk.LEFT)
         
         # Library list with scrollbar
         list_frame = ttk.Frame(parent)
@@ -303,6 +376,9 @@ class MusicPlaylistManager:
         self.library_tree.bind('<Button-3>', self.show_context_menu)
         self.library_tree.bind('<<TreeviewSelect>>', self.update_selection_count)
         
+        # Bind Space bar to play/stop
+        # self.root.bind('<space>', lambda e: self.toggle_playback())
+        
         # Bind column headers for sorting
         for col in ['#0', 'Filename', 'Path', 'Artist', 'Album', 'Tags']:
             self.library_tree.heading(col, command=lambda c=col: self.sort_column(c, False))
@@ -329,7 +405,8 @@ class MusicPlaylistManager:
         
         ttk.Label(edit_frame, text="Selected song tags:").pack(side=tk.LEFT)
         self.tag_edit_var = tk.StringVar()
-        tag_edit_entry = ttk.Entry(edit_frame, textvariable=self.tag_edit_var, width=50)
+        self.tag_entry = ttk.Entry(edit_frame, textvariable=self.tag_edit_var, width=50)
+        tag_edit_entry = self.tag_entry
         tag_edit_entry.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(edit_frame, text="Update Tags", 
@@ -378,6 +455,214 @@ class MusicPlaylistManager:
         # Reverse sort next time
         self.library_tree.heading(col, command=lambda: self.sort_column(col, not reverse))
     
+    def toggle_playback(self):
+        """Play or stop the selected song"""
+        if not PYGAME_AVAILABLE:
+            messagebox.showerror("Error", 
+                               "pygame library not installed.\n"
+                               "Install it with: pip install pygame")
+            return
+        
+        selection = self.library_tree.selection()
+        if not selection:
+            if self.is_playing:
+                self.stop_playback()
+            else:
+                messagebox.showwarning("Warning", "Please select a song to play")
+            return
+        
+        # Get the selected song
+        item = self.library_tree.item(selection[0])
+        song_id = item['text']
+        
+        # If already playing this song, stop it
+        if self.is_playing and self.currently_playing == song_id:
+            self.stop_playback()
+            return
+        
+        # Stop current playback if playing different song
+        if self.is_playing:
+            self.stop_playback()
+        
+        # Get file path
+        self.cursor.execute("SELECT relative_path, filename FROM songs WHERE id = ?", (song_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            messagebox.showerror("Error", "Song not found in database")
+            return
+        
+        file_path = Path(self.music_root) / row[0]
+        filename = row[1]
+        
+        if not file_path.exists():
+            messagebox.showerror("Error", f"File not found: {file_path}")
+            return
+        
+        try:
+            # Load and play the audio file
+            pygame.mixer.music.load(str(file_path))
+            pygame.mixer.music.set_volume(self.current_volume)
+            pygame.mixer.music.play()
+            
+            # Get song length
+            try:
+                if file_path.suffix.lower() == '.mp3' and MUTAGEN_AVAILABLE:
+                    audio = MP3(file_path)
+                    self.song_length = audio.info.length
+                else:
+                    # For non-MP3 files, we can't easily get the length
+                    # Set to 0 to disable seeking
+                    self.song_length = 0
+            except:
+                self.song_length = 0
+           
+            self.song_start_time = 0
+            self.is_playing = True
+            self.currently_playing = song_id
+            self.play_button.config(text="⏸ Stop")
+            self.now_playing_label.config(text=f"♪ {filename}")
+            
+            # Enable seek bar and start updating it
+            if self.song_length > 0:
+                self.seek_slider.config(state='normal')
+                self.seek_slider.set(0)
+                # Initialize time label
+                total_time = self.format_time(self.song_length)
+                self.time_label.config(text=f"0:00 / {total_time}")
+                self.update_seek_bar()
+            else:
+                self.seek_slider.config(state='disabled')
+                self.time_label.config(text="--:-- / --:--")
+            
+            # Check when song finishes playing
+            self.check_playback_status()
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to play audio: {str(e)}")
+            self.stop_playback()
+    
+    def stop_playback(self):
+        """Stop audio playback"""
+        if PYGAME_AVAILABLE and self.is_playing:
+            pygame.mixer.music.stop()
+        
+        self.is_playing = False
+        self.currently_playing = None
+        self.song_length = 0
+        self.song_start_time = 0
+        self.is_seeking = False
+        self.play_button.config(text="▶ Play")
+        self.now_playing_label.config(text="")
+        self.seek_slider.config(state='disabled')
+        self.seek_slider.set(0)
+        self.time_label.config(text="0:00 / 0:00")
+    
+    def check_playback_status(self):
+        """Check if audio is still playing and update UI accordingly"""
+        if self.is_playing:
+            if not pygame.mixer.music.get_busy():
+                # Song finished playing
+                self.stop_playback()
+            else:
+                # Check again in 100ms
+                self.root.after(100, self.check_playback_status)
+
+    def on_seek(self, value):
+        """Handle seek bar changes"""
+        if not PYGAME_AVAILABLE or self.song_length <= 0:
+            return
+        
+        # Only allow seeking if we have a valid song loaded
+        if not self.currently_playing:
+            return
+        
+        # Mark that we're seeking
+        self.is_seeking = True
+        
+        # Get the desired position in seconds
+        position = (float(value) / 100) * self.song_length
+        
+        # Get the current file path
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (self.currently_playing,))
+        row = self.cursor.fetchone()
+        if not row:
+            self.is_seeking = False
+            return
+        
+        file_path = Path(self.music_root) / row[0]
+        
+        try:
+            # Reload the music file and play from position
+            pygame.mixer.music.load(str(file_path))
+            pygame.mixer.music.set_volume(self.current_volume)
+            
+            # For MP3 files, set_pos works in seconds
+            pygame.mixer.music.play(start=position)
+            
+            # Update start time for accurate position tracking
+            self.song_start_time = position
+            
+            # Resume playing state
+            if not self.is_playing:
+                self.is_playing = True
+                self.play_button.config(text="⏸ Stop")
+                self.check_playback_status()
+            
+        except Exception as e:
+            print(f"Seek error: {e}")
+        
+        finally:
+            # Re-enable the update loop after a short delay
+            self.root.after(200, lambda: setattr(self, 'is_seeking', False))
+
+    def update_seek_bar(self):
+        """Update the seek bar position based on current playback position"""
+        if not self.is_playing or not PYGAME_AVAILABLE:
+            return
+            
+        if not self.is_seeking:
+            try:
+                # Get current position in milliseconds, convert to seconds
+                pos_ms = pygame.mixer.music.get_pos()
+                
+                # get_pos() returns time since start of current play, not file position
+                # Add the start time offset for accurate position
+                if pos_ms >= 0:
+                    current_pos = (pos_ms / 1000.0) + self.song_start_time
+                    
+                    # Clamp to song length
+                    if current_pos > self.song_length:
+                        current_pos = self.song_length
+                    
+                    if self.song_length > 0:
+                        # Update slider position
+                        percentage = (current_pos / self.song_length) * 100
+                        self.seek_slider.set(percentage)
+                        
+                        # Update time label
+                        current_time = self.format_time(current_pos)
+                        total_time = self.format_time(self.song_length)
+                        self.time_label.config(text=f"{current_time} / {total_time}")
+            except Exception as e:
+                print(f"Seek bar update error: {e}")
+        
+        # Continue updating every 100ms while playing
+        if self.is_playing:
+            self.root.after(100, self.update_seek_bar)
+
+    def format_time(self, seconds):
+        """Format seconds into MM:SS"""
+        minutes = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{minutes}:{secs:02d}"
+
+    def on_volume_change(self, value):
+        """Handle volume slider changes"""
+        if PYGAME_AVAILABLE:
+            self.current_volume = float(value) / 100
+            self.volume_label.config(text=f"{int(float(value))}%")
+            pygame.mixer.music.set_volume(self.current_volume)
+
     def create_playlist_dialog(self):
         """Show dialog to create a playlist from selected songs"""
         selected_items = self.library_tree.selection()
@@ -694,32 +979,44 @@ class MusicPlaylistManager:
         tag_filter = self.tag_filter_var.get().lower()
         artist_filter = self.artist_filter_var.get().lower()
         album_filter = self.album_filter_var.get().lower()
+        path_filter = self.path_filter_var.get().lower()
         
         query = "SELECT id, filename, relative_path, artist, album, tags FROM songs WHERE 1=1"
         params = []
         
-        if search_term:
-            query += " AND LOWER(filename) LIKE ?"
-            params.append(f"%{search_term}%")
+        # If path filter is used, only apply path filter
+        if path_filter:
+            query += " AND LOWER(relative_path) LIKE ?"
+            params.append(f"{path_filter}%")
+        else:
+            # Otherwise apply all other filters
+            if search_term:
+                query += " AND LOWER(filename) LIKE ?"
+                params.append(f"%{search_term}%")
+                
+            if tag_filter:
+                query += " AND LOWER(tags) LIKE ?"
+                params.append(f"%{tag_filter}%")
             
-        if tag_filter:
-            query += " AND LOWER(tags) LIKE ?"
-            params.append(f"%{tag_filter}%")
-        
-        if artist_filter:
-            query += " AND LOWER(artist) LIKE ?"
-            params.append(f"%{artist_filter}%")
-        
-        if album_filter:
-            query += " AND LOWER(album) LIKE ?"
-            params.append(f"%{album_filter}%")
+            if artist_filter:
+                query += " AND LOWER(artist) LIKE ?"
+                params.append(f"%{artist_filter}%")
+            
+            if album_filter:
+                query += " AND LOWER(album) LIKE ?"
+                params.append(f"%{album_filter}%")
             
         self.cursor.execute(query, params)
         
         for row in self.cursor.fetchall():
             song_id, filename, relative_path, artist, album, tags = row
+            # Extract parent directory path without filename
+            parent_path = str(Path(relative_path).parent)
+            # Show "." for files in root directory
+            if parent_path == '.':
+                parent_path = '(root)'
             self.library_tree.insert('', tk.END, text=song_id, 
-                                    values=(filename, relative_path, artist or '', album or '', tags or ''))
+                            values=(filename, parent_path, artist or '', album or '', tags or ''))
         
         self.update_selection_count()
             
@@ -732,6 +1029,7 @@ class MusicPlaylistManager:
             tags = item['values'][4]
             self.tag_edit_var.set(tags)
             self.current_edit_id = song_id
+            self.root.after(10, lambda: self.tag_entry.focus_set() and self.tag_entry.select_range(0, tk.END))
     
     def show_context_menu(self, event):
         """Show context menu on right-click"""
@@ -843,7 +1141,6 @@ class MusicPlaylistManager:
                 
                 # Update the display
                 self.update_library_list()
-                messagebox.showinfo("Success", f"File renamed to: {new_filename}")
                 dialog.destroy()
                 
             except Exception as e:
@@ -927,11 +1224,7 @@ class MusicPlaylistManager:
         y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
         dialog.geometry(f"+{x}+{y}")
         
-        # ============================================================
-        # FIXED LAYOUT SECTION
-        # ============================================================
-
-        # Main content frame (so button_frame doesn't compete with grid)
+        # Main content frame
         main_frame = ttk.Frame(dialog)
         main_frame.pack(fill="both", expand=True)
 
@@ -950,8 +1243,6 @@ class MusicPlaylistManager:
 
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-
-        # ============================================================
 
         # Title label
         title_label = ttk.Label(scrollable_frame, text=f"Editing: {current_filename}", 
@@ -995,12 +1286,9 @@ class MusicPlaylistManager:
         
         scrollable_frame.columnconfigure(1, weight=1)
 
-        # ============================================================
-        # Button frame (separate, bottom of dialog)
-        # ============================================================
+        # Button frame
         button_frame = ttk.Frame(dialog)
         button_frame.pack(side="bottom", fill="x", pady=10)
-        # ============================================================
 
         def save_metadata():
             try:
@@ -1073,8 +1361,6 @@ class MusicPlaylistManager:
                 
                 # Refresh the library list to show updated values
                 self.update_library_list()
-                
-                # messagebox.showinfo("Success", "ID3 metadata updated successfully!")
                 dialog.destroy()
                 
             except Exception as e:
@@ -1083,7 +1369,27 @@ class MusicPlaylistManager:
         ttk.Button(button_frame, text="Save", command=save_metadata, 
                   style='Accent.TButton').pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        # Auto-focus the title field
+        def focus_title():
+            title_entry = None
+            for field_name, widget in fields.items():
+                if field_name == 'title' and isinstance(widget, tk.StringVar):
+                    # Find the entry widget associated with this StringVar
+                    for child in scrollable_frame.winfo_children():
+                        if isinstance(child, ttk.Entry) and child.cget('textvariable') == str(widget):
+                            title_entry = child
+                            break
+                    break
+            
+            if title_entry:
+                title_entry.focus_set()
+                title_entry.select_range(0, tk.END)
+                title_entry.icursor(tk.END)
         
+        # Call after dialog is fully rendered
+        dialog.after(10, focus_title)
+
         # Bind Escape key to cancel
         dialog.bind('<Escape>', lambda e: dialog.destroy())
     
@@ -1172,7 +1478,6 @@ class MusicPlaylistManager:
                            (new_tags, self.current_edit_id))
         self.conn.commit()
         self.update_library_list()
-        messagebox.showinfo("Success", "Tags updated")
             
     def __del__(self):
         """Clean up database connection"""
