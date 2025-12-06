@@ -396,7 +396,7 @@ class MusicPlaylistManager:
         self.context_menu.add_command(label="Rename File", command=self.rename_file)
         self.context_menu.add_command(label="Edit ID3 Metadata", command=self.edit_id3_metadata)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Open in File Explorer", command=self.open_in_explorer)
+        self.context_menu.add_command(label="Copy File Path", command=self.copy_file_path)
         self.context_menu.add_command(label="Delete File", command=self.delete_file)
         
         # Edit frame
@@ -1393,8 +1393,8 @@ class MusicPlaylistManager:
         # Bind Escape key to cancel
         dialog.bind('<Escape>', lambda e: dialog.destroy())
     
-    def open_in_explorer(self):
-        """Open the selected file in the system file explorer"""
+    def copy_file_path(self):
+        """Copy the full path of the selected file to clipboard"""
         selection = self.library_tree.selection()
         if not selection:
             return
@@ -1415,16 +1415,19 @@ class MusicPlaylistManager:
             messagebox.showerror("Error", f"File not found: {file_path}")
             return
         
-        # Open file explorer with the file selected
+        # Copy to clipboard
         try:
-            if sys.platform == 'win32':
-                os.startfile(file_path.parent)
-            elif sys.platform == 'darwin':  # macOS
-                os.system(f'open "{file_path.parent}"')
-            else:  # Linux
-                os.system(f'xdg-open "{file_path.parent}"')
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(file_path))
+            self.root.update()  # Keep the clipboard content after window closes
+            
+            # Show a brief confirmation in the status area
+            original_text = self.now_playing_label.cget("text")
+            self.now_playing_label.config(text="✓ Path copied to clipboard")
+            self.root.after(2000, lambda: self.now_playing_label.config(text=original_text))
+            
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to open file explorer: {str(e)}")
+            messagebox.showerror("Error", f"Failed to copy path: {str(e)}")
     
     def delete_file(self):
         """Delete the selected file"""
