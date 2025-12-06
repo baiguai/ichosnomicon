@@ -45,7 +45,6 @@ class MusicPlaylistManager:
         self.root.bind('<Delete>', lambda e: self.delete_selected_files())
         self.root.bind('<F2>', lambda e: self.rename_selected_file())
         self.root.bind('<F5>', lambda e: self.update_library_list())
-        self.root.bind('<space>', lambda e: self.toggle_playback())
         self.root.bind('<Control-a>', lambda e: self.select_all())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
@@ -475,8 +474,7 @@ class MusicPlaylistManager:
         self.library_tree.bind('<Button-3>', self.show_context_menu)
         self.library_tree.bind('<<TreeviewSelect>>', self.update_selection_count)
         
-        # Bind Space bar to play/stop
-        # self.root.bind('<space>', lambda e: self.toggle_playback())
+
         
         # Bind column headers for sorting
         for col in ['#0', 'Filename', 'Path', 'Artist', 'Album', 'Tags']:
