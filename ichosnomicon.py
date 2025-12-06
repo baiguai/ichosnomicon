@@ -1925,7 +1925,20 @@ class MusicPlaylistManager:
         self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", 
                            (new_tags, self.current_edit_id))
         self.conn.commit()
+        
+        # Store the current song ID to restore selection after update
+        updated_song_id = self.current_edit_id
+        
+        # Update the library list
         self.update_library_list()
+        
+        # Restore the selection to the updated song
+        for item in self.library_tree.get_children():
+            item_data = self.library_tree.item(item)
+            if item_data['text'] == str(updated_song_id):
+                self.library_tree.selection_set(item)
+                self.library_tree.see(item)  # Scroll to the item if needed
+                break
             
     def on_tag_entry_change(self, *args):
         """Handle changes in the tag entry field"""
