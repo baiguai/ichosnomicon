@@ -399,6 +399,29 @@ class MusicPlaylistManager:
         self.context_menu.add_command(label="Copy File Path", command=self.copy_file_path)
         self.context_menu.add_command(label="Delete File", command=self.delete_file)
         
+        # Autocomplete frame (initially hidden)
+        self.autocomplete_frame = ttk.Frame(parent)
+        # Initially hidden, will be positioned at bottom when shown
+        
+        # Autocomplete listbox
+        self.autocomplete_listbox = tk.Listbox(self.autocomplete_frame, height=6,
+                                             bg=self.colors['entry_bg'],
+                                             fg=self.colors['fg'],
+                                             selectbackground=self.colors['accent'],
+                                             selectforeground=self.colors['select_fg'],
+                                             borderwidth=1,
+                                             relief='solid',
+                                             exportselection=False)
+        self.autocomplete_scrollbar = ttk.Scrollbar(self.autocomplete_frame, orient="vertical", 
+                                                  command=self.autocomplete_listbox.yview)
+        self.autocomplete_listbox.configure(yscrollcommand=self.autocomplete_scrollbar.set)
+        
+        self.autocomplete_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.autocomplete_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Hide autocomplete frame initially
+        self.autocomplete_frame.pack_forget()
+        
         # Edit frame
         edit_frame = ttk.Frame(parent, padding="10")
         edit_frame.pack(fill=tk.X)
@@ -408,6 +431,17 @@ class MusicPlaylistManager:
         self.tag_entry = ttk.Entry(edit_frame, textvariable=self.tag_edit_var, width=50)
         tag_edit_entry = self.tag_entry
         tag_edit_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Bind events for autocomplete
+        self.tag_edit_var.trace('w', self.on_tag_entry_change)
+        self.tag_entry.bind('<KeyRelease>', self.on_tag_key_release)
+        self.tag_entry.bind('<Return>', self.on_tag_enter)
+        self.tag_entry.bind('<Escape>', self.hide_autocomplete)
+        self.tag_entry.bind('<FocusOut>', self.on_tag_entry_focus_out)
+        self.tag_entry.bind('<Down>', lambda e: self.select_autocomplete_suggestion(1))
+        self.tag_entry.bind('<Up>', lambda e: self.select_autocomplete_suggestion(-1))
+        self.autocomplete_listbox.bind('<<ListboxSelect>>', self.on_autocomplete_listbox_select)
+        self.autocomplete_listbox.bind('<Double-Button-1>', self.on_autocomplete_listbox_double_click)
         
         ttk.Button(edit_frame, text="Update Tags", 
                    command=self.update_tags).pack(side=tk.LEFT)
@@ -1470,6 +1504,23 @@ class MusicPlaylistManager:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete file: {str(e)}")
             
+    def get_existing_tags(self):
+        """Get all existing tags from the database"""
+        if not self.conn:
+            return []
+        
+        try:
+            self.cursor.execute("SELECT tags FROM songs WHERE tags IS NOT NULL AND tags != ''")
+            all_tags = set()
+            for row in self.cursor.fetchall():
+                if row[0]:
+                    # Split tags by comma and clean them
+                    tags = [tag.strip() for tag in row[0].split(',') if tag.strip()]
+                    all_tags.update(tags)
+            return sorted(list(all_tags))
+        except:
+            return []
+    
     def update_tags(self):
         """Update tags for selected song"""
         if not hasattr(self, 'current_edit_id'):
@@ -1482,6 +1533,151 @@ class MusicPlaylistManager:
         self.conn.commit()
         self.update_library_list()
             
+    def on_tag_entry_change(self, *args):
+        """Handle changes in the tag entry field"""
+        current_text = self.tag_edit_var.get()
+        
+        if not current_text:
+            self.hide_autocomplete()
+            return
+        
+        # Get current cursor position to find the tag being edited
+        cursor_pos = self.tag_entry.index(tk.INSERT)
+        
+        # Find the start of the current tag (go back to find comma or start)
+        text_before_cursor = current_text[:cursor_pos]
+        last_comma = text_before_cursor.rfind(',')
+        
+        if last_comma >= 0:
+            current_tag_start = last_comma + 1
+            current_tag = text_before_cursor[current_tag_start:].strip()
+        else:
+            current_tag = text_before_cursor.strip()
+        
+        if not current_tag:
+            self.hide_autocomplete()
+            return
+        
+        # Get matching tags
+        all_tags = self.get_existing_tags()
+        matching_tags = [tag for tag in all_tags if current_tag.lower() in tag.lower()]
+        
+        if matching_tags:
+            self.show_autocomplete(matching_tags)
+        else:
+            self.hide_autocomplete()
+    
+    def show_autocomplete(self, tags):
+        """Show autocomplete panel with matching tags"""
+        # Clear existing suggestions
+        self.autocomplete_listbox.delete(0, tk.END)
+        
+        # Add matching tags
+        for tag in tags[:10]:  # Limit to 10 suggestions
+            self.autocomplete_listbox.insert(tk.END, tag)
+        
+        # Calculate listbox height (max 6 items, but fewer if less matches)
+        listbox_height = min(6, len(tags))
+        self.autocomplete_listbox.config(height=listbox_height)
+        
+        # Show autocomplete frame at the bottom of the parent (below songs list)
+        self.autocomplete_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # Select first item
+        if tags:
+            self.autocomplete_listbox.selection_set(0)
+            self.autocomplete_listbox.see(0)
+    
+    def hide_autocomplete(self, *args):
+        """Hide autocomplete panel"""
+        self.autocomplete_frame.pack_forget()
+    
+    def on_tag_key_release(self, event):
+        """Handle key release events in tag entry"""
+        # Don't process navigation keys
+        if event.keysym in ['Up', 'Down', 'Return', 'Escape', 'Tab']:
+            return
+        
+        # Update suggestions
+        self.on_tag_entry_change()
+    
+    def on_tag_enter(self, event):
+        """Handle Enter key in tag entry"""
+        if self.autocomplete_frame.winfo_ismapped():
+            # If suggestions are visible, apply the selected one
+            selection = self.autocomplete_listbox.curselection()
+            if selection:
+                self.apply_autocomplete_suggestion(self.autocomplete_listbox.get(selection[0]))
+            else:
+                self.hide_autocomplete()
+        else:
+            # If no suggestions visible, hide them just in case
+            self.hide_autocomplete()
+        return "break"  # Prevent default behavior
+    
+    def on_tag_entry_focus_out(self, event):
+        """Handle focus out event for tag entry"""
+        # Hide suggestions when focus is lost (with a small delay to allow clicking on listbox)
+        self.root.after(200, self.hide_autocomplete)
+    
+    def select_autocomplete_suggestion(self, direction):
+        """Select next/previous suggestion in autocomplete listbox"""
+        if not self.autocomplete_frame.winfo_ismapped():
+            return
+        
+        selection = self.autocomplete_listbox.curselection()
+        if selection:
+            current_index = selection[0]
+            new_index = current_index + direction
+            
+            if 0 <= new_index < self.autocomplete_listbox.size():
+                self.autocomplete_listbox.selection_clear(0, tk.END)
+                self.autocomplete_listbox.selection_set(new_index)
+                self.autocomplete_listbox.see(new_index)
+        elif direction > 0 and self.autocomplete_listbox.size() > 0:
+            # Select first item if going down and nothing is selected
+            self.autocomplete_listbox.selection_set(0)
+            self.autocomplete_listbox.see(0)
+    
+    def on_autocomplete_listbox_select(self, event):
+        """Handle selection in autocomplete listbox"""
+        selection = self.autocomplete_listbox.curselection()
+        if selection:
+            self.apply_autocomplete_suggestion(self.autocomplete_listbox.get(selection[0]))
+    
+    def on_autocomplete_listbox_double_click(self, event):
+        """Handle double click in autocomplete listbox"""
+        selection = self.autocomplete_listbox.curselection()
+        if selection:
+            self.apply_autocomplete_suggestion(self.autocomplete_listbox.get(selection[0]))
+    
+    def apply_autocomplete_suggestion(self, selected_tag):
+        """Apply selected tag suggestion"""
+        current_text = self.tag_edit_var.get()
+        cursor_pos = self.tag_entry.index(tk.INSERT)
+        
+        # Find the start of the current tag
+        text_before_cursor = current_text[:cursor_pos]
+        last_comma = text_before_cursor.rfind(',')
+        
+        if last_comma >= 0:
+            # Replace the current tag
+            new_text = (current_text[:last_comma + 1] + ' ' + selected_tag + 
+                       current_text[cursor_pos:])
+        else:
+            # Replace the entire text
+            new_text = selected_tag + current_text[cursor_pos:]
+        
+        # Update the entry field
+        self.tag_edit_var.set(new_text.strip())
+        
+        # Position cursor after the inserted tag
+        new_cursor_pos = len(new_text.strip()) - len(current_text[cursor_pos:])
+        self.tag_entry.icursor(new_cursor_pos)
+        
+        # Hide suggestions immediately
+        self.hide_autocomplete()
+    
     def __del__(self):
         """Clean up database connection"""
         if hasattr(self, 'conn') and self.conn:
