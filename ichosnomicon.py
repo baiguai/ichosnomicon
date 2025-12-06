@@ -9,7 +9,13 @@ import json
 
 try:
     from mutagen.mp3 import MP3
-    from mutagen.id3 import ID3, TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, COMM
+    from mutagen.id3 import ID3
+    from mutagen.id3._frames import TIT2, TPE1, TALB, TDRC, TRCK, TCON, TPE2, COMM
+    from mutagen.flac import FLAC
+    from mutagen.oggvorbis import OggVorbis
+    from mutagen.mp4 import MP4
+    from mutagen.easyid3 import EasyID3
+    from mutagen._file import File as MutagenFile
     MUTAGEN_AVAILABLE = True
 except ImportError:
     MUTAGEN_AVAILABLE = False
@@ -30,8 +36,18 @@ class MusicPlaylistManager:
         # Apply dark theme
         self.setup_dark_theme()
         
-        # Bind Ctrl+Q to quit application
+        # Bind keyboard shortcuts
         self.root.bind('<Control-q>', lambda e: self.quit_app())
+        self.root.bind('<Control-o>', lambda e: self.select_root())
+        self.root.bind('<Control-f>', lambda e: self.focus_search())
+        self.root.bind('<Control-n>', lambda e: self.scan_directory())
+        self.root.bind('<Control-p>', lambda e: self.create_playlist_dialog())
+        self.root.bind('<Delete>', lambda e: self.delete_selected_files())
+        self.root.bind('<F2>', lambda e: self.rename_selected_file())
+        self.root.bind('<F5>', lambda e: self.update_library_list())
+        self.root.bind('<space>', lambda e: self.toggle_playback())
+        self.root.bind('<Control-a>', lambda e: self.select_all())
+        self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
         self.currently_playing = None
@@ -58,6 +74,10 @@ class MusicPlaylistManager:
         
         # Config path is still in app directory
         self.config_path = self.app_dir / "config.json"
+        self.playlists_path = self.app_dir / "playlists"
+        
+        # Create playlists directory if it doesn't exist
+        self.playlists_path.mkdir(exist_ok=True)
         
         self.load_config()
         if self.music_root:
@@ -168,6 +188,83 @@ class MusicPlaylistManager:
             self.conn.close()
         self.root.quit()
     
+    def focus_search(self):
+        """Focus on the search field"""
+        self.search_entry.focus_set()
+    
+    def delete_selected_files(self):
+        """Delete all selected files"""
+        selected_items = self.library_tree.selection()
+        if not selected_items:
+            return
+        
+        if len(selected_items) == 1:
+            # Use existing single file delete method
+            self.delete_file()
+        else:
+            # Bulk delete
+            count = len(selected_items)
+            if not messagebox.askyesno("Confirm Delete", 
+                                       f"Are you sure you want to delete {count} selected files?\n\n"
+                                       "This action cannot be undone!"):
+                return
+            
+            deleted = 0
+            errors = []
+            
+            for item_id in selected_items:
+                try:
+                    item = self.library_tree.item(item_id)
+                    song_id = item['text']
+                    filename = item['values'][0]
+                    
+                    # Get file path
+                    self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+                    row = self.cursor.fetchone()
+                    if row:
+                        file_path = Path(self.music_root) / row[0]
+                        
+                        # Delete file
+                        if file_path.exists():
+                            file_path.unlink()
+                        
+                        # Remove from database
+                        self.cursor.execute("DELETE FROM songs WHERE id = ?", (song_id,))
+                        deleted += 1
+                    else:
+                        errors.append(f"{filename}: Not found in database")
+                        
+                except Exception as e:
+                    errors.append(f"{filename}: {str(e)}")
+            
+            self.conn.commit()
+            self.update_library_list()
+            
+            msg = f"Successfully deleted {deleted} files."
+            if errors:
+                msg += f"\n\nErrors:\n" + "\n".join(errors[:5])
+                if len(errors) > 5:
+                    msg += f"\n... and {len(errors) - 5} more errors"
+            
+            messagebox.showinfo("Bulk Delete Complete", msg)
+    
+    def rename_selected_file(self):
+        """Rename the selected file"""
+        selection = self.library_tree.selection()
+        if selection:
+            self.rename_file()
+    
+    def select_all(self):
+        """Select all items in the library tree"""
+        all_items = self.library_tree.get_children()
+        self.library_tree.selection_set(all_items)
+        self.update_selection_count()
+    
+    def clear_selection(self):
+        """Clear all selections"""
+        self.library_tree.selection_remove(self.library_tree.selection())
+        self.update_selection_count()
+    
     def load_database(self):
         """Load or create database in the music root directory"""
         if not self.music_root:
@@ -263,6 +360,8 @@ class MusicPlaylistManager:
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog,
                    style='Accent.TButton').pack(side=tk.LEFT, padx=5)
+        ttk.Button(top_frame, text="Manage Playlists", 
+                   command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
         
         # Play button
         self.play_button = ttk.Button(top_frame, text="▶ Play", 
@@ -319,8 +418,8 @@ class MusicPlaylistManager:
         ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT)
         self.search_var = tk.StringVar()
         self.search_var.trace('w', lambda *args: self.update_library_list())
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=40)
-        search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=40)
+        self.search_entry.pack(side=tk.LEFT, padx=5)
         
         ttk.Label(search_frame, text="Tags:").pack(side=tk.LEFT, padx=(20, 5))
         self.tag_filter_var = tk.StringVar()
@@ -445,6 +544,8 @@ class MusicPlaylistManager:
         
         ttk.Button(edit_frame, text="Update Tags", 
                    command=self.update_tags).pack(side=tk.LEFT)
+        ttk.Button(edit_frame, text="Bulk Edit Tags", 
+                   command=self.bulk_edit_tags_dialog).pack(side=tk.LEFT, padx=5)
     
     def update_selection_count(self, event=None):
         """Update the selection count label"""
@@ -540,12 +641,13 @@ class MusicPlaylistManager:
             
             # Get song length
             try:
-                if file_path.suffix.lower() == '.mp3' and MUTAGEN_AVAILABLE:
-                    audio = MP3(file_path)
-                    self.song_length = audio.info.length
+                if MUTAGEN_AVAILABLE:
+                    audio_file = MutagenFile(file_path)
+                    if audio_file is not None and hasattr(audio_file, 'info'):
+                        self.song_length = audio_file.info.length
+                    else:
+                        self.song_length = 0
                 else:
-                    # For non-MP3 files, we can't easily get the length
-                    # Set to 0 to disable seeking
                     self.song_length = 0
             except:
                 self.song_length = 0
@@ -873,6 +975,259 @@ class MusicPlaylistManager:
         # Bind Enter key
         dialog.bind('<Return>', lambda e: create_playlist())
         dialog.bind('<Escape>', lambda e: dialog.destroy())
+    
+    def manage_playlists_dialog(self):
+        """Show dialog to manage saved playlists"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Manage Playlists")
+        dialog.geometry("700x500")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Title
+        ttk.Label(dialog, text="Saved Playlists", 
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=15)
+        
+        # Playlist list with scrollbar
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=10)
+        
+        scrollbar = ttk.Scrollbar(list_frame)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        playlist_tree = ttk.Treeview(list_frame, columns=('Name', 'Type', 'Songs', 'Path'), 
+                                   yscrollcommand=scrollbar.set, selectmode='browse')
+        playlist_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=playlist_tree.yview)
+        
+        playlist_tree.heading('#0', text='ID')
+        playlist_tree.heading('Name', text='Name')
+        playlist_tree.heading('Type', text='Type')
+        playlist_tree.heading('Songs', text='Songs')
+        playlist_tree.heading('Path', text='Path')
+        
+        playlist_tree.column('#0', width=50)
+        playlist_tree.column('Name', width=150)
+        playlist_tree.column('Type', width=80)
+        playlist_tree.column('Songs', width=80)
+        playlist_tree.column('Path', width=300)
+        
+        # Load existing playlists
+        self.load_saved_playlists(playlist_tree)
+        
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=15)
+        
+        def load_playlist():
+            selection = playlist_tree.selection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select a playlist to load")
+                return
+            
+            item = playlist_tree.item(selection[0])
+            playlist_path = item['values'][3]
+            
+            if not Path(playlist_path).exists():
+                messagebox.showerror("Error", f"Playlist file not found: {playlist_path}")
+                return
+            
+            # Load playlist and filter library
+            self.load_playlist_to_library(playlist_path)
+            dialog.destroy()
+        
+        def delete_playlist():
+            selection = playlist_tree.selection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select a playlist to delete")
+                return
+            
+            item = playlist_tree.item(selection[0])
+            playlist_name = item['values'][0]
+            playlist_path = item['values'][3]
+            
+            if not messagebox.askyesno("Confirm Delete", 
+                                       f"Are you sure you want to delete '{playlist_name}'?"):
+                return
+            
+            try:
+                Path(playlist_path).unlink()
+                playlist_tree.delete(selection[0])
+                messagebox.showinfo("Success", f"Playlist '{playlist_name}' deleted")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete playlist: {str(e)}")
+        
+        def export_playlist():
+            selection = playlist_tree.selection()
+            if not selection:
+                messagebox.showwarning("No Selection", "Please select a playlist to export")
+                return
+            
+            item = playlist_tree.item(selection[0])
+            playlist_path = item['values'][3]
+            
+            export_path = filedialog.asksaveasfilename(
+                title="Export Playlist",
+                defaultextension=".json",
+                filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
+            )
+            
+            if export_path:
+                try:
+                    import shutil
+                    shutil.copy2(playlist_path, export_path)
+                    messagebox.showinfo("Success", f"Playlist exported to: {export_path}")
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to export playlist: {str(e)}")
+        
+        # Center buttons
+        button_container = ttk.Frame(button_frame)
+        button_container.pack()
+        
+        ttk.Button(button_container, text="Load", command=load_playlist, 
+                  style='Accent.TButton', width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_container, text="Delete", command=delete_playlist, 
+                  width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_container, text="Export", command=export_playlist, 
+                  width=12).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_container, text="Close", command=dialog.destroy, 
+                  width=12).pack(side=tk.LEFT, padx=5)
+        
+        # Bind double-click to load
+        playlist_tree.bind('<Double-Button-1>', lambda e: load_playlist())
+        
+        # Bind Escape key
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+    
+    def load_saved_playlists(self, tree):
+        """Load saved playlists into the treeview"""
+        # Clear existing items
+        tree.delete(*tree.get_children())
+        
+        # Scan for playlist files
+        playlist_files = []
+        
+        # Look for .m3u files
+        for m3u_file in self.playlists_path.glob("*.m3u"):
+            playlist_files.append(('M3U', m3u_file))
+        
+        # Look for .pls files  
+        for pls_file in self.playlists_path.glob("*.pls"):
+            playlist_files.append(('PLS', pls_file))
+        
+        # Look for .json playlist files (our custom format)
+        for json_file in self.playlists_path.glob("*.json"):
+            playlist_files.append(('JSON', json_file))
+        
+        # Add to tree
+        for idx, (playlist_type, file_path) in enumerate(playlist_files, 1):
+            try:
+                if playlist_type == 'JSON':
+                    # Count songs in JSON playlist
+                    with open(file_path, 'r') as f:
+                        data = json.load(f)
+                        song_count = len(data.get('songs', []))
+                elif playlist_type == 'M3U':
+                    # Count lines in M3U file (excluding #EXTM3U)
+                    with open(file_path, 'r') as f:
+                        lines = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+                        song_count = len(lines)
+                elif playlist_type == 'PLS':
+                    # Count File entries in PLS file
+                    with open(file_path, 'r') as f:
+                        content = f.read()
+                        song_count = content.count('File')
+                else:
+                    song_count = 0
+                
+                tree.insert('', tk.END, text=idx, 
+                          values=(file_path.stem, playlist_type, song_count, str(file_path)))
+                          
+            except Exception as e:
+                print(f"Error loading playlist {file_path}: {e}")
+    
+    def load_playlist_to_library(self, playlist_path):
+        """Load a playlist and filter the library to show only those songs"""
+        playlist_path = Path(playlist_path)
+        playlist_songs = set()
+        
+        try:
+            if playlist_path.suffix.lower() == '.json':
+                # Load JSON playlist
+                with open(playlist_path, 'r') as f:
+                    data = json.load(f)
+                    for song in data.get('songs', []):
+                        playlist_songs.add(song.get('relative_path', ''))
+                        
+            elif playlist_path.suffix.lower() == '.m3u':
+                # Load M3U playlist
+                with open(playlist_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            # Convert absolute path to relative if needed
+                            line_path = Path(line)
+                            if line_path.is_absolute():
+                                try:
+                                    rel_path = str(line_path.relative_to(Path(self.music_root)))
+                                    playlist_songs.add(rel_path)
+                                except ValueError:
+                                    # Path is not relative to music root
+                                    pass
+                            else:
+                                playlist_songs.add(line)
+                                
+            elif playlist_path.suffix.lower() == '.pls':
+                # Load PLS playlist
+                with open(playlist_path, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('File'):
+                            file_path = line.split('=', 1)[1]
+                            line_path = Path(file_path)
+                            if line_path.is_absolute():
+                                try:
+                                    rel_path = str(line_path.relative_to(Path(self.music_root)))
+                                    playlist_songs.add(rel_path)
+                                except ValueError:
+                                    pass
+                            else:
+                                playlist_songs.add(file_path)
+            
+            # Filter library to show only playlist songs
+            self.filter_library_to_playlist(playlist_songs)
+            
+            # Show status
+            self.now_playing_label.config(text=f"♪ Loaded playlist: {playlist_path.stem} ({len(playlist_songs)} songs)")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load playlist: {str(e)}")
+    
+    def filter_library_to_playlist(self, playlist_songs):
+        """Filter the library tree to show only songs in the playlist"""
+        # Clear current selection
+        self.library_tree.selection_remove(self.library_tree.get_children())
+        
+        # Select and show only playlist songs
+        for item in self.library_tree.get_children():
+            item_data = self.library_tree.item(item)
+            song_id = item_data['text']
+            
+            # Get relative path from database
+            self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+            row = self.cursor.fetchone()
+            if row and row[0] in playlist_songs:
+                self.library_tree.selection_add(item)
+        
+        # Update selection count
+        self.update_selection_count()
         
     def select_root(self):
         """Select the music root directory"""
@@ -966,18 +1321,52 @@ class MusicPlaylistManager:
             if relative_path in existing_songs and tags:
                 preserved_tags += 1
             
-            # Try to read ID3 metadata for MP3 files
+            # Try to read metadata for various audio formats
             artist = ""
             album = ""
-            if file_path.suffix.lower() == '.mp3' and MUTAGEN_AVAILABLE:
+            if MUTAGEN_AVAILABLE:
                 try:
-                    audio = MP3(file_path, ID3=ID3)
-                    if audio.tags:
-                        if 'TPE1' in audio.tags:
-                            artist = str(audio.tags['TPE1'])
-                        if 'TALB' in audio.tags:
-                            album = str(audio.tags['TALB'])
-                except:
+                    # Use mutagen's universal File class for broad format support
+                    audio_file = MutagenFile(file_path)
+                    
+                    if audio_file is not None:
+                        # Handle different format types
+                        if file_path.suffix.lower() == '.mp3':
+                            # MP3 with ID3 tags
+                            if hasattr(audio_file, 'tags') and audio_file.tags:
+                                if 'TPE1' in audio_file.tags:
+                                    artist = str(audio_file.tags['TPE1'])
+                                if 'TALB' in audio_file.tags:
+                                    album = str(audio_file.tags['TALB'])
+                        
+                        elif file_path.suffix.lower() == '.flac':
+                            # FLAC format
+                            if hasattr(audio_file, 'tags') and audio_file.tags:
+                                artist = audio_file.tags.get('ARTIST', [''])[0]
+                                album = audio_file.tags.get('ALBUM', [''])[0]
+                        
+                        elif file_path.suffix.lower() in ['.ogg', '.oga']:
+                            # OGG Vorbis format
+                            if hasattr(audio_file, 'tags') and audio_file.tags:
+                                artist = audio_file.tags.get('ARTIST', [''])[0]
+                                album = audio_file.tags.get('ALBUM', [''])[0]
+                        
+                        elif file_path.suffix.lower() in ['.m4a', '.mp4']:
+                            # MP4/AAC format
+                            if hasattr(audio_file, 'tags') and audio_file.tags:
+                                artist = audio_file.tags.get('\xa9ART', [''])[0]
+                                album = audio_file.tags.get('\xa9alb', [''])[0]
+                        
+                        else:
+                            # Try EasyID3 for other formats that support it
+                            try:
+                                easy_audio = EasyID3(file_path)
+                                artist = easy_audio.get('artist', [''])[0]
+                                album = easy_audio.get('album', [''])[0]
+                            except:
+                                pass  # EasyID3 not supported for this format
+                
+                except Exception:
                     pass  # Skip files with read errors
             
             self.cursor.execute(
@@ -1523,9 +1912,14 @@ class MusicPlaylistManager:
     
     def update_tags(self):
         """Update tags for selected song"""
-        if not hasattr(self, 'current_edit_id'):
-            messagebox.showwarning("Warning", "Please select a song first")
-            return
+        # Get the currently selected song if current_edit_id is not set
+        if not hasattr(self, 'current_edit_id') or self.current_edit_id is None:
+            selection = self.library_tree.selection()
+            if not selection:
+                messagebox.showwarning("Warning", "Please select a song first")
+                return
+            item = self.library_tree.item(selection[0])
+            self.current_edit_id = item['text']
             
         new_tags = self.tag_edit_var.get()
         self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", 
@@ -1677,6 +2071,193 @@ class MusicPlaylistManager:
         
         # Hide suggestions immediately
         self.hide_autocomplete()
+    
+    def bulk_edit_tags_dialog(self):
+        """Show dialog for bulk editing tags of selected songs"""
+        selected_items = self.library_tree.selection()
+        
+        if not selected_items:
+            messagebox.showwarning("No Selection", "Please select songs to bulk edit tags")
+            return
+        
+        # Create dialog
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Bulk Edit Tags ({len(selected_items)} songs)")
+        dialog.geometry("600x400")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+        
+        # Center the dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Title
+        ttk.Label(dialog, text=f"Bulk Edit Tags for {len(selected_items)} songs", 
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=15)
+        
+        # Main content frame
+        main_frame = ttk.Frame(dialog)
+        main_frame.pack(fill="both", expand=True, padx=20)
+        
+        # Tag operation selection
+        operation_frame = ttk.LabelFrame(main_frame, text="Tag Operation", padding="10")
+        operation_frame.pack(fill=tk.X, pady=10)
+        
+        operation_var = tk.StringVar(value="add")
+        ttk.Radiobutton(operation_frame, text="Add tags", variable=operation_var, 
+                       value="add").pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(operation_frame, text="Replace tags", variable=operation_var, 
+                       value="replace").pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(operation_frame, text="Remove tags", variable=operation_var, 
+                       value="remove").pack(anchor=tk.W, pady=2)
+        ttk.Radiobutton(operation_frame, text="Clear all tags", variable=operation_var, 
+                       value="clear").pack(anchor=tk.W, pady=2)
+        
+        # Tags input
+        tags_frame = ttk.LabelFrame(main_frame, text="Tags", padding="10")
+        tags_frame.pack(fill=tk.X, pady=10)
+        
+        ttk.Label(tags_frame, text="Enter tags (comma-separated):").pack(anchor=tk.W)
+        tags_var = tk.StringVar()
+        tags_entry = ttk.Entry(tags_frame, textvariable=tags_var, width=60)
+        tags_entry.pack(fill=tk.X, pady=5)
+        
+        # Show existing tags summary
+        existing_tags = set()
+        for item_id in selected_items:
+            item = self.library_tree.item(item_id)
+            tags = item['values'][4]
+            if tags:
+                existing_tags.update(tag.strip() for tag in tags.split(',') if tag.strip())
+        
+        if existing_tags:
+            summary_text = f"Current tags in selection: {', '.join(sorted(existing_tags))}"
+            ttk.Label(tags_frame, text=summary_text, wraplength=550, 
+                     foreground=self.colors['accent']).pack(anchor=tk.W, pady=5)
+        
+        # Preview frame
+        preview_frame = ttk.LabelFrame(main_frame, text="Preview", padding="10")
+        preview_frame.pack(fill=tk.BOTH, expand=True, pady=10)
+        
+        preview_text = tk.Text(preview_frame, height=8, wrap=tk.WORD,
+                              bg=self.colors['entry_bg'],
+                              fg=self.colors['fg'],
+                              insertbackground=self.colors['fg'],
+                              highlightthickness=1,
+                              highlightbackground=self.colors['border'],
+                              highlightcolor=self.colors['accent'])
+        preview_scrollbar = ttk.Scrollbar(preview_frame, orient="vertical", 
+                                        command=preview_text.yview)
+        preview_text.configure(yscrollcommand=preview_scrollbar.set)
+        
+        preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        preview_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        def update_preview(*args):
+            """Update preview based on operation and tags"""
+            operation = operation_var.get()
+            new_tags = [tag.strip() for tag in tags_var.get().split(',') if tag.strip()]
+            
+            preview_content = []
+            for item_id in selected_items:
+                item = self.library_tree.item(item_id)
+                filename = item['values'][0]
+                current_tags = [tag.strip() for tag in item['values'][4].split(',') if tag.strip()] if item['values'][4] else []
+                
+                if operation == "add":
+                    final_tags = current_tags + [tag for tag in new_tags if tag not in current_tags]
+                elif operation == "replace":
+                    final_tags = new_tags
+                elif operation == "remove":
+                    final_tags = [tag for tag in current_tags if tag not in new_tags]
+                elif operation == "clear":
+                    final_tags = []
+                else:
+                    final_tags = current_tags
+                
+                preview_content.append(f"{filename}: {', '.join(final_tags) if final_tags else '(no tags)'}")
+            
+            preview_text.delete('1.0', tk.END)
+            preview_text.insert('1.0', '\n'.join(preview_content))
+        
+        # Bind preview update
+        operation_var.trace('w', update_preview)
+        tags_var.trace('w', update_preview)
+        
+        # Initial preview
+        update_preview()
+        
+        # Button frame
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(side="bottom", fill="x", pady=15)
+        
+        def apply_bulk_tags():
+            """Apply bulk tag changes"""
+            operation = operation_var.get()
+            new_tags = [tag.strip() for tag in tags_var.get().split(',') if tag.strip()]
+            
+            updated = 0
+            errors = []
+            
+            for item_id in selected_items:
+                try:
+                    item = self.library_tree.item(item_id)
+                    song_id = item['text']
+                    current_tags = [tag.strip() for tag in item['values'][4].split(',') if tag.strip()] if item['values'][4] else []
+                    
+                    if operation == "add":
+                        final_tags = current_tags + [tag for tag in new_tags if tag not in current_tags]
+                    elif operation == "replace":
+                        final_tags = new_tags
+                    elif operation == "remove":
+                        final_tags = [tag for tag in current_tags if tag not in new_tags]
+                    elif operation == "clear":
+                        final_tags = []
+                    else:
+                        final_tags = current_tags
+                    
+                    # Update database
+                    final_tags_str = ', '.join(final_tags) if final_tags else ''
+                    self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", 
+                                       (final_tags_str, song_id))
+                    updated += 1
+                    
+                except Exception as e:
+                    errors.append(f"Error updating {item['values'][0]}: {str(e)}")
+            
+            if updated > 0:
+                self.conn.commit()
+                self.update_library_list()
+            
+            # Show result
+            if errors:
+                msg = f"Updated {updated} songs with {len(errors)} errors:\n\n" + '\n'.join(errors[:5])
+                if len(errors) > 5:
+                    msg += f"\n... and {len(errors) - 5} more errors"
+                messagebox.showwarning("Partial Success", msg)
+            else:
+                messagebox.showinfo("Success", f"Successfully updated tags for {updated} songs")
+            
+            dialog.destroy()
+        
+        # Center buttons
+        button_container = ttk.Frame(button_frame)
+        button_container.pack()
+        
+        ttk.Button(button_container, text="Apply", command=apply_bulk_tags, 
+                  style='Accent.TButton', width=15).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_container, text="Cancel", command=dialog.destroy, 
+                  width=15).pack(side=tk.LEFT, padx=5)
+        
+        # Focus on tags entry
+        tags_entry.focus_set()
+        
+        # Bind Enter key to apply
+        dialog.bind('<Return>', lambda e: apply_bulk_tags())
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
     
     def __del__(self):
         """Clean up database connection"""
