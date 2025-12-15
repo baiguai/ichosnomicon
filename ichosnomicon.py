@@ -1672,6 +1672,7 @@ class MusicPlaylistManager:
         
         # Create input fields
         fields = {}
+        entries = []
         field_definitions = [
             ('title', 'Title:'),
             ('artist', 'Artist:'),
@@ -1703,6 +1704,7 @@ class MusicPlaylistManager:
                 var = tk.StringVar(value=current_values[field_name])
                 entry = ttk.Entry(scrollable_frame, textvariable=var, width=50)
                 entry.grid(row=idx, column=1, padx=10, pady=5, sticky='ew')
+                entries.append(entry)
                 fields[field_name] = var
         
         scrollable_frame.columnconfigure(1, weight=1)
@@ -1790,6 +1792,9 @@ class MusicPlaylistManager:
         ttk.Button(button_frame, text="Save", command=save_metadata, 
                   style='Accent.TButton').pack(side=tk.LEFT, padx=5)
         ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        for entry in entries:
+            entry.bind('<Return>', lambda e: save_metadata())
 
         # Auto-focus the title field
         def focus_title():
