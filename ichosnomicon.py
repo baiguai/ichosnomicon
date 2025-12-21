@@ -1713,6 +1713,10 @@ class MusicPlaylistManager:
         button_frame = ttk.Frame(dialog)
         button_frame.pack(side="bottom", fill="x", pady=10)
 
+        # Center buttons
+        button_container = ttk.Frame(button_frame)
+        button_container.pack()
+
         def save_metadata():
             try:
                 # Get new values
@@ -1789,12 +1793,16 @@ class MusicPlaylistManager:
             except Exception as e:
                 messagebox.showerror("Error", f"Failed to save ID3 tags: {str(e)}")
         
-        ttk.Button(button_frame, text="Save", command=save_metadata, 
+        ttk.Button(button_container, text="Save", command=save_metadata, 
                   style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(button_frame, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(button_container, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT, padx=5)
+
+        def save_and_break(event=None):
+            save_metadata()
+            return "break"
 
         for entry in entries:
-            entry.bind('<Return>', lambda e: save_metadata())
+            entry.bind('<Return>', save_and_break)
 
         # Auto-focus the title field
         def focus_title():
