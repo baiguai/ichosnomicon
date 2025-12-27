@@ -359,8 +359,8 @@ class MusicPlaylistManager:
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog,
                    style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="Manage Playlists", 
-                   command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
+        # ttk.Button(top_frame, text="Manage Playlists", 
+        #            command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
         
         # Play button
         self.play_button = ttk.Button(top_frame, text="▶ Play", 
@@ -919,15 +919,50 @@ class MusicPlaylistManager:
                     
                     playlist_dir.mkdir(parents=True)
                     
+                    # Create progress dialog
+                    progress_dialog = tk.Toplevel(dialog)
+                    progress_dialog.title("Creating Playlist")
+                    progress_dialog.geometry("500x150")
+                    progress_dialog.transient(dialog)
+                    progress_dialog.grab_set()
+                    progress_dialog.configure(bg=self.colors['bg'])
+
+                    progress_dialog.update_idletasks()
+                    x = dialog.winfo_x() + (dialog.winfo_width() // 2) - (progress_dialog.winfo_width() // 2)
+                    y = dialog.winfo_y() + (dialog.winfo_height() // 2) - (progress_dialog.winfo_height() // 2)
+                    progress_dialog.geometry(f"+{x}+{y}")
+
+                    ttk.Label(progress_dialog, text=f"Copying files to '{playlist_name}'...",
+                             font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+
+                    progress_label = ttk.Label(progress_dialog, text=f"0 / {len(songs)}")
+                    progress_label.pack(pady=5)
+
+                    progress_bar = ttk.Progressbar(progress_dialog, length=400, mode='determinate', maximum=len(songs))
+                    progress_bar.pack(pady=10)
+
+                    current_file_label = ttk.Label(progress_dialog, text="", wraplength=450)
+                    current_file_label.pack(pady=5)
+                    
                     copied = 0
-                    for song in songs:
+                    for idx, song in enumerate(songs):
                         source = Path(self.music_root) / song['relative_path']
                         destination_file = playlist_dir / song['filename']
+                        
+                        progress_label.config(text=f"{idx + 1} / {len(songs)}")
+                        current_file_label.config(text=f"Copying: {song['filename']}")
+                        progress_dialog.update()
+
                         try:
                             shutil.copy2(source, destination_file)
                             copied += 1
                         except Exception as e:
                             print(f"Error copying {song['filename']}: {e}")
+
+                        progress_bar['value'] = idx + 1
+                        progress_dialog.update()
+                    
+                    progress_dialog.destroy()
                     
                     messagebox.showinfo("Success", 
                                        f"Created playlist folder with {copied} files at:\n{playlist_dir}")
