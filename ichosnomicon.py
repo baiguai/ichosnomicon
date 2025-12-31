@@ -1493,6 +1493,9 @@ class MusicPlaylistManager:
             self.library_tree.insert('', tk.END, text=song_id, 
                             values=(filename, parent_path, artist or '', album or '', tags or ''))
         
+        if show_duplicates:
+            self.sort_column('Filename', False)
+        
         self.update_selection_count()
             
     def edit_tags(self, event):
@@ -1953,7 +1956,7 @@ class MusicPlaylistManager:
             
             # Update the display
             self.update_library_list()
-            messagebox.showinfo("Success", f"File deleted: {filename}")
+            # messagebox.showinfo("Success", f"File deleted: {filename}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete file: {str(e)}")
