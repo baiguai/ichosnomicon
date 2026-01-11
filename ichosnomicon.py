@@ -89,17 +89,17 @@ class MusicPlaylistManager:
         """Configure dark theme colors and styles"""
         # Dark theme colors
         self.colors = {
-            'bg': '#1e1e1e',
-            'fg': '#e0e0e0',
-            'select_bg': '#2d2d30',
+            'bg': '#121212',
+            'fg': '#bfd0f8',
+            'select_bg': '#121212',
             'select_fg': '#ffffff',
-            'button_bg': '#3c3c3c',
-            'entry_bg': '#2d2d30',
-            'entry_fg': '#e0e0e0',
-            'accent': '#6a7482',
-            'accent_hover': '#005a9e',
-            'border': '#3c3c3c',
-            'highlight': '#6a7482',
+            'button_bg': '#2a2a2a',
+            'entry_bg': '#121212',
+            'entry_fg': '#bfd0f8',
+            'accent': '#808080',
+            'accent_hover': '#a0a0a0',
+            'border': '#2a2a2a',
+            'highlight': '#808080',
         }
         
         # Configure root window
