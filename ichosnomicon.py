@@ -171,6 +171,15 @@ class MusicPlaylistManager:
                        bordercolor=self.colors['border'])
         style.map('Treeview.Heading',
                  background=[('active', self.colors['accent'])])
+
+        # Checkbutton
+        style.configure('TCheckbutton',
+                       background=self.colors['bg'],
+                       foreground=self.colors['fg'])
+        style.map('TCheckbutton',
+                 background=[('active', self.colors['bg'])],
+                 indicatorcolor=[('selected', self.colors['accent'])],
+                 relief=[('selected', 'flat')])
         
         # Scrollbar
         style.configure('Vertical.TScrollbar',
@@ -359,8 +368,8 @@ class MusicPlaylistManager:
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog,
                    style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        ttk.Button(top_frame, text="Manage Playlists", 
-                   command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
+        # ttk.Button(top_frame, text="Manage Playlists", 
+        #            command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
         
         # Play button
         self.play_button = ttk.Button(top_frame, text="▶ Play", 
@@ -443,6 +452,11 @@ class MusicPlaylistManager:
         self.path_filter_var.trace('w', lambda *args: self.update_library_list())
         path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
         path_filter_entry.pack(side=tk.LEFT)
+
+        self.show_duplicates_var = tk.BooleanVar()
+        self.show_duplicates_var.trace('w', lambda *args: self.update_library_list())
+        duplicates_check = ttk.Checkbutton(search_frame, text="Show Duplicates", variable=self.show_duplicates_var)
+        duplicates_check.pack(side=tk.LEFT, padx=(20, 5))
         
         # Library list with scrollbar
         list_frame = ttk.Frame(parent)
@@ -584,6 +598,10 @@ class MusicPlaylistManager:
             self.library_tree.heading('#0', text='ID' + arrow)
         else:
             self.library_tree.heading(col, text=col + arrow)
+        
+        # Store sort state
+        self.sort_column_name = col
+        self.sort_reverse = reverse
         
         # Reverse sort next time
         self.library_tree.heading(col, command=lambda: self.sort_column(col, not reverse))
@@ -919,15 +937,50 @@ class MusicPlaylistManager:
                     
                     playlist_dir.mkdir(parents=True)
                     
+                    # Create progress dialog
+                    progress_dialog = tk.Toplevel(dialog)
+                    progress_dialog.title("Creating Playlist")
+                    progress_dialog.geometry("500x150")
+                    progress_dialog.transient(dialog)
+                    progress_dialog.grab_set()
+                    progress_dialog.configure(bg=self.colors['bg'])
+
+                    progress_dialog.update_idletasks()
+                    x = dialog.winfo_x() + (dialog.winfo_width() // 2) - (progress_dialog.winfo_width() // 2)
+                    y = dialog.winfo_y() + (dialog.winfo_height() // 2) - (progress_dialog.winfo_height() // 2)
+                    progress_dialog.geometry(f"+{x}+{y}")
+
+                    ttk.Label(progress_dialog, text=f"Copying files to '{playlist_name}'...",
+                             font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+
+                    progress_label = ttk.Label(progress_dialog, text=f"0 / {len(songs)}")
+                    progress_label.pack(pady=5)
+
+                    progress_bar = ttk.Progressbar(progress_dialog, length=400, mode='determinate', maximum=len(songs))
+                    progress_bar.pack(pady=10)
+
+                    current_file_label = ttk.Label(progress_dialog, text="", wraplength=450)
+                    current_file_label.pack(pady=5)
+                    
                     copied = 0
-                    for song in songs:
+                    for idx, song in enumerate(songs):
                         source = Path(self.music_root) / song['relative_path']
                         destination_file = playlist_dir / song['filename']
+                        
+                        progress_label.config(text=f"{idx + 1} / {len(songs)}")
+                        current_file_label.config(text=f"Copying: {song['filename']}")
+                        progress_dialog.update()
+
                         try:
                             shutil.copy2(source, destination_file)
                             copied += 1
                         except Exception as e:
                             print(f"Error copying {song['filename']}: {e}")
+
+                        progress_bar['value'] = idx + 1
+                        progress_dialog.update()
+                    
+                    progress_dialog.destroy()
                     
                     messagebox.showinfo("Success", 
                                        f"Created playlist folder with {copied} files at:\n{playlist_dir}")
@@ -1401,31 +1454,36 @@ class MusicPlaylistManager:
         artist_filter = self.artist_filter_var.get().lower()
         album_filter = self.album_filter_var.get().lower()
         path_filter = self.path_filter_var.get().lower()
+        show_duplicates = self.show_duplicates_var.get()
         
-        query = "SELECT id, filename, relative_path, artist, album, tags FROM songs WHERE 1=1"
+        query = "SELECT id, filename, relative_path, artist, album, tags FROM songs"
         params = []
-        
+        conditions = []
+
+        if show_duplicates:
+            conditions.append("filename IN (SELECT filename FROM songs GROUP BY filename HAVING COUNT(*) > 1)")
+
         # If path filter is used, only apply path filter
         if path_filter:
-            query += " AND LOWER(relative_path) LIKE ?"
+            conditions.append("LOWER(relative_path) LIKE ?")
             params.append(f"{path_filter}%")
         else:
             # Otherwise apply all other filters
             if search_term:
-                query += " AND LOWER(filename) LIKE ?"
+                conditions.append("LOWER(filename) LIKE ?")
                 params.append(f"%{search_term}%")
-                
             if tag_filter:
-                query += " AND LOWER(tags) LIKE ?"
+                conditions.append("LOWER(tags) LIKE ?")
                 params.append(f"%{tag_filter}%")
-            
             if artist_filter:
-                query += " AND LOWER(artist) LIKE ?"
+                conditions.append("LOWER(artist) LIKE ?")
                 params.append(f"%{artist_filter}%")
-            
             if album_filter:
-                query += " AND LOWER(album) LIKE ?"
+                conditions.append("LOWER(album) LIKE ?")
                 params.append(f"%{album_filter}%")
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
             
         self.cursor.execute(query, params)
         
@@ -1439,6 +1497,13 @@ class MusicPlaylistManager:
             self.library_tree.insert('', tk.END, text=song_id, 
                             values=(filename, parent_path, artist or '', album or '', tags or ''))
         
+        if show_duplicates:
+            self.sort_column('Filename', False)
+        
+        # Re-apply sorting
+        if self.sort_column_name:
+            self.sort_column(self.sort_column_name, self.sort_reverse)
+            
         self.update_selection_count()
             
     def edit_tags(self, event):
@@ -1899,7 +1964,7 @@ class MusicPlaylistManager:
             
             # Update the display
             self.update_library_list()
-            messagebox.showinfo("Success", f"File deleted: {filename}")
+            # messagebox.showinfo("Success", f"File deleted: {filename}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete file: {str(e)}")
