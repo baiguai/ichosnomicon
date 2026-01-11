@@ -599,6 +599,10 @@ class MusicPlaylistManager:
         else:
             self.library_tree.heading(col, text=col + arrow)
         
+        # Store sort state
+        self.sort_column_name = col
+        self.sort_reverse = reverse
+        
         # Reverse sort next time
         self.library_tree.heading(col, command=lambda: self.sort_column(col, not reverse))
     
@@ -1496,6 +1500,10 @@ class MusicPlaylistManager:
         if show_duplicates:
             self.sort_column('Filename', False)
         
+        # Re-apply sorting
+        if self.sort_column_name:
+            self.sort_column(self.sort_column_name, self.sort_reverse)
+            
         self.update_selection_count()
             
     def edit_tags(self, event):
