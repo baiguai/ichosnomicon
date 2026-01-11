@@ -171,6 +171,15 @@ class MusicPlaylistManager:
                        bordercolor=self.colors['border'])
         style.map('Treeview.Heading',
                  background=[('active', self.colors['accent'])])
+
+        # Checkbutton
+        style.configure('TCheckbutton',
+                       background=self.colors['bg'],
+                       foreground=self.colors['fg'])
+        style.map('TCheckbutton',
+                 background=[('active', self.colors['bg'])],
+                 indicatorcolor=[('selected', self.colors['accent'])],
+                 relief=[('selected', 'flat')])
         
         # Scrollbar
         style.configure('Vertical.TScrollbar',
@@ -443,6 +452,11 @@ class MusicPlaylistManager:
         self.path_filter_var.trace('w', lambda *args: self.update_library_list())
         path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
         path_filter_entry.pack(side=tk.LEFT)
+
+        self.show_duplicates_var = tk.BooleanVar()
+        self.show_duplicates_var.trace('w', lambda *args: self.update_library_list())
+        duplicates_check = ttk.Checkbutton(search_frame, text="Show Duplicates", variable=self.show_duplicates_var)
+        duplicates_check.pack(side=tk.LEFT, padx=(20, 5))
         
         # Library list with scrollbar
         list_frame = ttk.Frame(parent)
@@ -1436,31 +1450,36 @@ class MusicPlaylistManager:
         artist_filter = self.artist_filter_var.get().lower()
         album_filter = self.album_filter_var.get().lower()
         path_filter = self.path_filter_var.get().lower()
+        show_duplicates = self.show_duplicates_var.get()
         
-        query = "SELECT id, filename, relative_path, artist, album, tags FROM songs WHERE 1=1"
+        query = "SELECT id, filename, relative_path, artist, album, tags FROM songs"
         params = []
-        
+        conditions = []
+
+        if show_duplicates:
+            conditions.append("filename IN (SELECT filename FROM songs GROUP BY filename HAVING COUNT(*) > 1)")
+
         # If path filter is used, only apply path filter
         if path_filter:
-            query += " AND LOWER(relative_path) LIKE ?"
+            conditions.append("LOWER(relative_path) LIKE ?")
             params.append(f"{path_filter}%")
         else:
             # Otherwise apply all other filters
             if search_term:
-                query += " AND LOWER(filename) LIKE ?"
+                conditions.append("LOWER(filename) LIKE ?")
                 params.append(f"%{search_term}%")
-                
             if tag_filter:
-                query += " AND LOWER(tags) LIKE ?"
+                conditions.append("LOWER(tags) LIKE ?")
                 params.append(f"%{tag_filter}%")
-            
             if artist_filter:
-                query += " AND LOWER(artist) LIKE ?"
+                conditions.append("LOWER(artist) LIKE ?")
                 params.append(f"%{artist_filter}%")
-            
             if album_filter:
-                query += " AND LOWER(album) LIKE ?"
+                conditions.append("LOWER(album) LIKE ?")
                 params.append(f"%{album_filter}%")
+        
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
             
         self.cursor.execute(query, params)
         
@@ -1473,6 +1492,9 @@ class MusicPlaylistManager:
                 parent_path = '(root)'
             self.library_tree.insert('', tk.END, text=song_id, 
                             values=(filename, parent_path, artist or '', album or '', tags or ''))
+        
+        if show_duplicates:
+            self.sort_column('Filename', False)
         
         self.update_selection_count()
             
@@ -1934,7 +1956,7 @@ class MusicPlaylistManager:
             
             # Update the display
             self.update_library_list()
-            messagebox.showinfo("Success", f"File deleted: {filename}")
+            # messagebox.showinfo("Success", f"File deleted: {filename}")
             
         except Exception as e:
             messagebox.showerror("Error", f"Failed to delete file: {str(e)}")
