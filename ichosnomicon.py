@@ -315,6 +315,9 @@ class MusicPlaylistManager:
         if 'album' not in columns:
             self.cursor.execute("ALTER TABLE songs ADD COLUMN album TEXT")
         
+        if 'last_modified' not in columns:
+            self.cursor.execute("ALTER TABLE songs ADD COLUMN last_modified REAL")
+        
         self.conn.commit()
         
     def load_config(self):
@@ -1303,37 +1306,43 @@ class MusicPlaylistManager:
                                   "New database created. Click 'Scan Directory' to add songs.")
             
     def scan_directory(self):
-        """Scan the music directory and populate database, preserving existing tags"""
+        """
+        Scans the music directory for new, updated, and deleted audio files.
+        It updates the database incrementally rather than rescanning everything.
+        """
         if not self.music_root:
             messagebox.showerror("Error", "Please select a music root directory first")
             return
-            
+
         if not os.path.exists(self.music_root):
             messagebox.showerror("Error", "Music root directory does not exist")
             return
-        
-        # First, get all existing songs with their tags
-        self.cursor.execute("SELECT relative_path, tags FROM songs")
-        existing_songs = {row[0]: row[1] for row in self.cursor.fetchall()}
-        
-        # Clear existing songs
-        self.cursor.execute("DELETE FROM songs")
-        
-        audio_extensions = {'.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'}
+
         music_root_path = Path(self.music_root)
+        audio_extensions = {'.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'}
+
+        # --- 1. Fetch existing songs from DB ---
+        # Map relative_path to (id, last_modified, tags) for efficient lookups and updates
+        self.cursor.execute("SELECT id, relative_path, last_modified, tags FROM songs")
+        # Use a dictionary for O(1) lookups
+        db_songs = {row[1]: {'id': row[0], 'mtime': row[2], 'tags': row[3]} for row in self.cursor.fetchall()}
         
-        # First pass: collect all audio files
-        audio_files = []
+        # Keep track of files found on disk to identify deletions later
+        files_on_disk_relative_paths = set()
+
+        # --- 2. First pass: Collect all audio files for total count and identify new/updated ---
+        all_disk_files = []
         for file_path in music_root_path.rglob('*'):
             if file_path.suffix.lower() in audio_extensions:
-                audio_files.append(file_path)
+                all_disk_files.append(file_path)
         
-        total_files = len(audio_files)
-        if total_files == 0:
-            messagebox.showinfo("No Files", "No audio files found in the selected directory")
+        total_disk_files = len(all_disk_files)
+        
+        if total_disk_files == 0 and not db_songs:
+            messagebox.showinfo("No Files", "No audio files found in the selected directory and database is empty.")
             return
         
-        # Create progress dialog
+        # --- Create progress dialog ---
         progress_dialog = tk.Toplevel(self.root)
         progress_dialog.title("Scanning Directory")
         progress_dialog.geometry("500x150")
@@ -1341,106 +1350,124 @@ class MusicPlaylistManager:
         progress_dialog.grab_set()
         progress_dialog.configure(bg=self.colors['bg'])
         
-        # Center the dialog
         progress_dialog.update_idletasks()
-        x = (progress_dialog.winfo_screenwidth() // 2) - (progress_dialog.winfo_width() // 2)
-        y = (progress_dialog.winfo_screenheight() // 2) - (progress_dialog.winfo_height() // 2)
+        x = (self.root.winfo_screenwidth() // 2) - (progress_dialog.winfo_width() // 2)
+        y = (self.root.winfo_screenheight() // 2) - (progress_dialog.winfo_height() // 2)
         progress_dialog.geometry(f"+{x}+{y}")
         
-        ttk.Label(progress_dialog, text="Scanning audio files...", 
-                 font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
+        status_label = ttk.Label(progress_dialog, text="Initializing scan...", 
+                                font=('TkDefaultFont', 10, 'bold'))
+        status_label.pack(pady=10)
         
         progress_label = ttk.Label(progress_dialog, text="0 / 0")
         progress_label.pack(pady=5)
         
-        progress_bar = ttk.Progressbar(progress_dialog, length=400, mode='determinate', maximum=total_files)
+        progress_bar = ttk.Progressbar(progress_dialog, length=400, mode='determinate', maximum=total_disk_files)
         progress_bar.pack(pady=10)
         
         current_file_label = ttk.Label(progress_dialog, text="", wraplength=450)
         current_file_label.pack(pady=5)
         
-        count = 0
-        preserved_tags = 0
+        added_count = 0
+        updated_count = 0
         
-        # Process files
-        for idx, file_path in enumerate(audio_files):
+        # --- 3. Process files on disk (add new, update existing) ---
+        for idx, file_path in enumerate(all_disk_files):
             relative_path = str(file_path.relative_to(music_root_path))
             filename = file_path.name
-            
-            # Use existing tags if available, otherwise empty string
-            tags = existing_songs.get(relative_path, "")
-            if relative_path in existing_songs and tags:
-                preserved_tags += 1
-            
-            # Try to read metadata for various audio formats
+            mtime = file_path.stat().st_mtime # Get modification time
+
+            files_on_disk_relative_paths.add(relative_path) # Mark as found on disk
+
+            status_label.config(text="Processing audio files...")
+            progress_label.config(text=f"{idx + 1} / {total_disk_files}")
+            current_file_label.config(text=f"File: {filename}")
+            progress_bar['value'] = idx + 1
+            progress_dialog.update()
+
             artist = ""
             album = ""
+            current_tags = "" # Tags are preserved if already in DB, only metadata is updated from file
+
             if MUTAGEN_AVAILABLE:
                 try:
-                    # Use mutagen's universal File class for broad format support
                     audio_file = MutagenFile(file_path)
-                    
                     if audio_file is not None:
-                        # Handle different format types
+                        # Extract artist and album based on file type
                         if file_path.suffix.lower() == '.mp3':
-                            # MP3 with ID3 tags
                             if hasattr(audio_file, 'tags') and audio_file.tags:
-                                if 'TPE1' in audio_file.tags:
-                                    artist = str(audio_file.tags['TPE1'])
-                                if 'TALB' in audio_file.tags:
-                                    album = str(audio_file.tags['TALB'])
-                        
+                                artist = str(audio_file.tags.get('TPE1', [''])[0])
+                                album = str(audio_file.tags.get('TALB', [''])[0])
                         elif file_path.suffix.lower() == '.flac':
-                            # FLAC format
                             if hasattr(audio_file, 'tags') and audio_file.tags:
                                 artist = audio_file.tags.get('ARTIST', [''])[0]
                                 album = audio_file.tags.get('ALBUM', [''])[0]
-                        
                         elif file_path.suffix.lower() in ['.ogg', '.oga']:
-                            # OGG Vorbis format
                             if hasattr(audio_file, 'tags') and audio_file.tags:
                                 artist = audio_file.tags.get('ARTIST', [''])[0]
                                 album = audio_file.tags.get('ALBUM', [''])[0]
-                        
                         elif file_path.suffix.lower() in ['.m4a', '.mp4']:
-                            # MP4/AAC format
                             if hasattr(audio_file, 'tags') and audio_file.tags:
                                 artist = audio_file.tags.get('\xa9ART', [''])[0]
                                 album = audio_file.tags.get('\xa9alb', [''])[0]
-                        
                         else:
-                            # Try EasyID3 for other formats that support it
                             try:
                                 easy_audio = EasyID3(file_path)
                                 artist = easy_audio.get('artist', [''])[0]
                                 album = easy_audio.get('album', [''])[0]
                             except:
-                                pass  # EasyID3 not supported for this format
-                
+                                pass
                 except Exception:
-                    pass  # Skip files with read errors
-            
-            self.cursor.execute(
-                "INSERT OR IGNORE INTO songs (relative_path, filename, tags, artist, album) VALUES (?, ?, ?, ?, ?)",
-                (relative_path, filename, tags, artist, album)
-            )
-            count += 1
-            
-            # Update progress every 10 files or on last file
-            if idx % 10 == 0 or idx == total_files - 1:
-                progress_bar['value'] = idx + 1
-                progress_label.config(text=f"{idx + 1} / {total_files}")
-                current_file_label.config(text=f"Processing: {filename}")
-                progress_dialog.update()
+                    pass # Skip files with read errors
+
+            if relative_path in db_songs:
+                # File exists in DB, check if updated
+                db_entry = db_songs[relative_path]
+                current_tags = db_entry['tags'] # Preserve existing tags
+                if mtime > (db_entry['mtime'] or 0):
+                    # File was modified, update its metadata
+                    self.cursor.execute(
+                        "UPDATE songs SET filename = ?, tags = ?, artist = ?, album = ?, last_modified = ? WHERE id = ?",
+                        (filename, current_tags, artist, album, mtime, db_entry['id'])
+                    )
+                    updated_count += 1
+                # Remove from db_songs so remaining entries are deletions
+                del db_songs[relative_path]
+            else:
+                # New file, insert into DB
+                self.cursor.execute(
+                    "INSERT INTO songs (relative_path, filename, tags, artist, album, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+                    (relative_path, filename, current_tags, artist, album, mtime)
+                )
+                added_count += 1
         
+        # --- 4. Identify and remove deleted files ---
+        deleted_count = 0
+        if db_songs: # If db_songs is not empty, it contains files not found on disk
+            status_label.config(text="Removing deleted files...")
+            total_deleted = len(db_songs)
+            
+            # Temporarily change progress bar max for deletion phase
+            progress_bar.config(maximum=total_deleted, value=0) 
+            progress_label.config(text=f"0 / {total_deleted}")
+            
+            for idx, (relative_path, db_entry) in enumerate(db_songs.items()):
+                self.cursor.execute("DELETE FROM songs WHERE id = ?", (db_entry['id'],))
+                deleted_count += 1
+
+                progress_label.config(text=f"{idx + 1} / {total_deleted}")
+                current_file_label.config(text=f"Deleting: {relative_path}")
+                progress_bar['value'] = idx + 1
+                progress_dialog.update()
+
         self.conn.commit()
         progress_dialog.destroy()
         self.update_library_list()
-        
-        msg = f"Scanned {count} audio files"
-        if preserved_tags > 0:
-            msg += f"\nPreserved tags for {preserved_tags} existing songs"
-        messagebox.showinfo("Success", msg)
+
+        summary_msg = f"Scan Complete:\nAdded {added_count} new files.\n" \
+                      f"Updated {updated_count} existing files.\n" \
+                      f"Removed {deleted_count} deleted files."
+        messagebox.showinfo("Scan Summary", summary_msg)
         
     def update_library_list(self):
         """Update the library list based on search filters"""
