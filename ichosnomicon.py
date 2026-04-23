@@ -369,10 +369,7 @@ class MusicPlaylistManager:
         self.selection_label.pack(side=tk.LEFT, padx=5)
         
         ttk.Button(top_frame, text="Create Playlist", 
-                   command=self.create_playlist_dialog,
-                   style='Accent.TButton').pack(side=tk.LEFT, padx=5)
-        # ttk.Button(top_frame, text="Manage Playlists", 
-        #            command=self.manage_playlists_dialog).pack(side=tk.LEFT, padx=5)
+                   command=self.create_playlist_dialog).pack(side=tk.LEFT, padx=5)
         
         # Play button
         self.play_button = ttk.Button(top_frame, text="▶ Play", 
@@ -2387,3 +2384,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
