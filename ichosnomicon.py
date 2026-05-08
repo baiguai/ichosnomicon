@@ -6,6 +6,7 @@ import sys
 import shutil
 from pathlib import Path
 import json
+from datetime import datetime
 
 try:
     from mutagen.mp3 import MP3
@@ -46,6 +47,7 @@ class MusicPlaylistManager:
         self.root.bind('<F2>', lambda e: self.rename_selected_file())
         self.root.bind('<F5>', lambda e: self.update_library_list())
         self.root.bind('<Control-a>', lambda e: self.select_all())
+        self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -826,7 +828,7 @@ class MusicPlaylistManager:
         # Create dialog
         dialog = tk.Toplevel(self.root)
         dialog.title("Create Playlist")
-        dialog.geometry("600x410")
+        dialog.geometry("600x450")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(bg=self.colors['bg'])
@@ -866,6 +868,12 @@ class MusicPlaylistManager:
         
         ttk.Radiobutton(options_frame, text="PLS Playlist - Create .pls playlist file", 
                        variable=playlist_type, value="pls").pack(anchor=tk.W, pady=5)
+        
+        ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+        
+        add_timestamp_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Add timestamp to filenames (_yyyymmddHHmmss)", 
+                       variable=add_timestamp_var).pack(anchor=tk.W, pady=2)
         
         # Destination
         dest_frame = ttk.Frame(dialog)
@@ -962,13 +970,23 @@ class MusicPlaylistManager:
                     current_file_label = ttk.Label(progress_dialog, text="", wraplength=450)
                     current_file_label.pack(pady=5)
                     
+                    timestamp_str = datetime.now().strftime("_%Y%m%d%H%M%S") if add_timestamp_var.get() else ""
+                    
                     copied = 0
                     for idx, song in enumerate(songs):
                         source = Path(self.music_root) / song['relative_path']
-                        destination_file = playlist_dir / song['filename']
+                        if timestamp_str:
+                            if '.' in song['filename']:
+                                name, ext = song['filename'].rsplit('.', 1)
+                                new_filename = f"{name}{timestamp_str}.{ext}"
+                            else:
+                                new_filename = f"{song['filename']}{timestamp_str}"
+                        else:
+                            new_filename = song['filename']
+                        destination_file = playlist_dir / new_filename
                         
                         progress_label.config(text=f"{idx + 1} / {len(songs)}")
-                        current_file_label.config(text=f"Copying: {song['filename']}")
+                        current_file_label.config(text=f"Copying: {new_filename}")
                         progress_dialog.update()
 
                         try:
