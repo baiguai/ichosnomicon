@@ -48,6 +48,7 @@ class MusicPlaylistManager:
         self.root.bind('<F5>', lambda e: self.update_library_list())
         self.root.bind('<Control-a>', lambda e: self.select_all())
         self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
+        self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
