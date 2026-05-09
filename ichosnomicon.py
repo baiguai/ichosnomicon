@@ -6,6 +6,7 @@ import sys
 import shutil
 from pathlib import Path
 import json
+from datetime import datetime
 
 try:
     from mutagen.mp3 import MP3
@@ -46,6 +47,10 @@ class MusicPlaylistManager:
         self.root.bind('<F2>', lambda e: self.rename_selected_file())
         self.root.bind('<F5>', lambda e: self.update_library_list())
         self.root.bind('<Control-a>', lambda e: self.select_all())
+        self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
+        self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
+        self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
+        self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -55,6 +60,7 @@ class MusicPlaylistManager:
         self.song_length = 0
         self.is_seeking = False  # Flag to prevent update loop during manual seek
         self.song_start_time = 0  # Track when song started for accurate positioning
+        self._wav_sound = None  # Sound object for WAV playback
         
         # App directory - use script location even when frozen by PyInstaller
         if getattr(sys, 'frozen', False):
@@ -190,8 +196,11 @@ class MusicPlaylistManager:
     
     def quit_app(self):
         """Cleanly close the application"""
-        if PYGAME_AVAILABLE and self.is_playing:
-            pygame.mixer.music.stop()
+        if PYGAME_AVAILABLE:
+            if self._wav_sound is not None:
+                self._wav_sound.stop()
+            elif self.is_playing:
+                pygame.mixer.music.stop()
         if self.conn:
             self.conn.close()
         self.root.quit()
@@ -272,7 +281,162 @@ class MusicPlaylistManager:
         """Clear all selections"""
         self.library_tree.selection_remove(self.library_tree.selection())
         self.update_selection_count()
-    
+
+    def show_help(self):
+        """Show keyboard shortcuts help dialog"""
+        shortcuts = [
+            ("Ctrl+Q", "Quit application"),
+            ("Ctrl+O", "Select music root directory"),
+            ("Ctrl+F", "Focus search field"),
+            ("Ctrl+N", "Scan directory"),
+            ("Ctrl+P", "Create playlist"),
+            ("Ctrl+Shift+P", "Play / Stop selected song"),
+            ("Ctrl+Shift+L", "Show loop/BPM info"),
+            ("Ctrl+A", "Select all"),
+            ("Ctrl+Shift+C", "Copy file path"),
+            ("Ctrl+Shift+T", "Edit tags"),
+            ("Delete", "Delete selected file(s)"),
+            ("F2", "Rename selected file"),
+            ("F5", "Refresh library list"),
+            ("Escape", "Clear selection"),
+        ]
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Keyboard Shortcuts")
+        dialog.geometry("450x350")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Keyboard Shortcuts",
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=15)
+
+        frame = ttk.Frame(dialog)
+        frame.pack(fill=tk.BOTH, expand=True, padx=20)
+
+        canvas = tk.Canvas(frame, bg=self.colors['bg'], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        for key, desc in shortcuts:
+            row = ttk.Frame(inner)
+            row.pack(fill=tk.X, pady=3)
+            ttk.Label(row, text=key, font=('TkDefaultFont', 9, 'bold'),
+                     foreground=self.colors['accent']).pack(side=tk.LEFT, padx=(0, 15))
+            ttk.Label(row, text=desc).pack(side=tk.LEFT)
+
+        close_btn = ttk.Button(dialog, text="Close", command=dialog.destroy, width=15)
+        close_btn.pack(pady=15)
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
+    def show_loop_info(self):
+        """Show loop/BPM info for the selected file"""
+        selection = self.library_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a song first")
+            return
+
+        item = self.library_tree.item(selection[0])
+        song_id = item['text']
+        filename = item['values'][0]
+
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            messagebox.showerror("Error", "Song not found in database")
+            return
+
+        file_path = Path(self.music_root) / row[0]
+        if not file_path.exists():
+            messagebox.showerror("Error", f"File not found: {file_path}")
+            return
+
+        duration = 0
+        if MUTAGEN_AVAILABLE:
+            try:
+                audio_file = MutagenFile(file_path)
+                if audio_file is not None and hasattr(audio_file, 'info'):
+                    duration = audio_file.info.length
+            except:
+                pass
+
+        if duration <= 0:
+            messagebox.showerror("Error", "Could not determine file duration")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Loop / BPM Info")
+        dialog.geometry("420x280")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Loop Information",
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+
+        info_frame = ttk.Frame(dialog)
+        info_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        ttk.Label(info_frame, text=f"File: {filename}",
+                 font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
+
+        dur_min = int(duration // 60)
+        dur_sec = int(duration % 60)
+        ttk.Label(info_frame, text=f"Duration: {dur_min}:{dur_sec:02d}").pack(anchor=tk.W, pady=(5, 10))
+
+        is_long = duration > 30
+        if is_long:
+            warn_frame = ttk.Frame(info_frame)
+            warn_frame.pack(fill=tk.X, pady=(0, 10))
+            warn_label = ttk.Label(warn_frame,
+                text="⚠ This file is over 30 seconds long and is likely\na full song, not a loop sample.",
+                foreground='#ffcc00', justify=tk.LEFT)
+            warn_label.pack(anchor=tk.W)
+
+        ttk.Separator(info_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+
+        bpm_frame = ttk.Frame(info_frame)
+        bpm_frame.pack(fill=tk.X)
+
+        ttk.Label(bpm_frame, text="If this is a loop in 4/4 time:",
+                 font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        measures = [
+            (1, duration / 4),
+            (2, duration / 8),
+            (4, duration / 16),
+        ]
+
+        for num_beats, beat_duration in [(4, duration), (8, duration), (16, duration)]:
+            measures_count = num_beats // 4
+            bpm = round((num_beats * 60) / duration)
+            row_frame = ttk.Frame(bpm_frame)
+            row_frame.pack(fill=tk.X, pady=2)
+            ttk.Label(row_frame,
+                     text=f"{measures_count} measure{'s' if measures_count > 1 else ''}:",
+                     width=14, anchor=tk.W).pack(side=tk.LEFT)
+            ttk.Label(row_frame, text=f"{bpm} BPM",
+                     foreground=self.colors['accent'],
+                     font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=15)
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
     def load_database(self):
         """Load or create database in the music root directory"""
         if not self.music_root:
@@ -558,7 +722,11 @@ class MusicPlaylistManager:
                    command=self.update_tags).pack(side=tk.LEFT)
         ttk.Button(edit_frame, text="Bulk Edit Tags", 
                    command=self.bulk_edit_tags_dialog).pack(side=tk.LEFT, padx=5)
-    
+
+        ttk.Frame(edit_frame).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(edit_frame, text=" ? ", width=4,
+                   command=self.show_help).pack(side=tk.RIGHT)
+
     def update_selection_count(self, event=None):
         """Update the selection count label"""
         selected = len(self.library_tree.selection())
@@ -650,42 +818,53 @@ class MusicPlaylistManager:
             return
         
         try:
-            # Load and play the audio file
-            pygame.mixer.music.load(str(file_path))
-            pygame.mixer.music.set_volume(self.current_volume)
-            pygame.mixer.music.play()
-            
-            # Get song length
-            try:
-                if MUTAGEN_AVAILABLE:
-                    audio_file = MutagenFile(file_path)
-                    if audio_file is not None and hasattr(audio_file, 'info'):
-                        self.song_length = audio_file.info.length
+            is_wav = file_path.suffix.lower() == '.wav'
+
+            if is_wav:
+                self._wav_sound = pygame.mixer.Sound(str(file_path))
+                self._wav_sound.set_volume(self.current_volume)
+                self._wav_sound.play()
+                self.song_length = self._wav_sound.get_length()
+                self.song_start_time = 0
+            else:
+                pygame.mixer.music.load(str(file_path))
+                pygame.mixer.music.set_volume(self.current_volume)
+                pygame.mixer.music.play()
+
+                # Get song length
+                try:
+                    if MUTAGEN_AVAILABLE:
+                        audio_file = MutagenFile(file_path)
+                        if audio_file is not None and hasattr(audio_file, 'info'):
+                            self.song_length = audio_file.info.length
+                        else:
+                            self.song_length = 0
                     else:
                         self.song_length = 0
-                else:
+                except:
                     self.song_length = 0
-            except:
-                self.song_length = 0
-           
-            self.song_start_time = 0
+                self.song_start_time = 0
+
             self.is_playing = True
             self.currently_playing = song_id
             self.play_button.config(text="⏸ Stop")
             self.now_playing_label.config(text=f"♪ {filename}")
-            
+
             # Enable seek bar and start updating it
-            if self.song_length > 0:
+            if self.song_length > 0 and not is_wav:
                 self.seek_slider.config(state='normal')
                 self.seek_slider.set(0)
-                # Initialize time label
                 total_time = self.format_time(self.song_length)
                 self.time_label.config(text=f"0:00 / {total_time}")
                 self.update_seek_bar()
             else:
                 self.seek_slider.config(state='disabled')
-                self.time_label.config(text="--:-- / --:--")
-            
+                if self.song_length > 0:
+                    total_time = self.format_time(self.song_length)
+                    self.time_label.config(text=f"0:00 / {total_time}")
+                else:
+                    self.time_label.config(text="--:-- / --:--")
+
             # Check when song finishes playing
             self.check_playback_status()
             
@@ -695,14 +874,19 @@ class MusicPlaylistManager:
     
     def stop_playback(self):
         """Stop audio playback"""
-        if PYGAME_AVAILABLE and self.is_playing:
-            pygame.mixer.music.stop()
+        if PYGAME_AVAILABLE:
+            if self._wav_sound is not None:
+                self._wav_sound.stop()
+                self._wav_sound = None
+            elif self.is_playing:
+                pygame.mixer.music.stop()
         
         self.is_playing = False
         self.currently_playing = None
         self.song_length = 0
         self.song_start_time = 0
         self.is_seeking = False
+        self._wav_sound = None
         self.play_button.config(text="▶ Play")
         self.now_playing_label.config(text="")
         self.seek_slider.config(state='disabled')
@@ -712,11 +896,20 @@ class MusicPlaylistManager:
     def check_playback_status(self):
         """Check if audio is still playing and update UI accordingly"""
         if self.is_playing:
-            if not pygame.mixer.music.get_busy():
-                # Song finished playing
+            still_playing = False
+            if self._wav_sound is not None:
+                # Check all channels for this sound
+                for i in range(pygame.mixer.get_num_channels()):
+                    ch = pygame.mixer.Channel(i)
+                    if ch.get_sound() == self._wav_sound:
+                        still_playing = True
+                        break
+            else:
+                still_playing = pygame.mixer.music.get_busy()
+
+            if not still_playing:
                 self.stop_playback()
             else:
-                # Check again in 100ms
                 self.root.after(100, self.check_playback_status)
 
     def on_seek(self, value):
@@ -814,6 +1007,8 @@ class MusicPlaylistManager:
             self.current_volume = float(value) / 100
             self.volume_label.config(text=f"{int(float(value))}%")
             pygame.mixer.music.set_volume(self.current_volume)
+            if self._wav_sound is not None:
+                self._wav_sound.set_volume(self.current_volume)
 
     def create_playlist_dialog(self):
         """Show dialog to create a playlist from selected songs"""
@@ -826,7 +1021,7 @@ class MusicPlaylistManager:
         # Create dialog
         dialog = tk.Toplevel(self.root)
         dialog.title("Create Playlist")
-        dialog.geometry("600x410")
+        dialog.geometry("600x450")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(bg=self.colors['bg'])
@@ -867,6 +1062,12 @@ class MusicPlaylistManager:
         ttk.Radiobutton(options_frame, text="PLS Playlist - Create .pls playlist file", 
                        variable=playlist_type, value="pls").pack(anchor=tk.W, pady=5)
         
+        ttk.Separator(options_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+        
+        add_timestamp_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Add timestamp to filenames (_yyyymmddHHmmss)", 
+                       variable=add_timestamp_var).pack(anchor=tk.W, pady=2)
+        
         # Destination
         dest_frame = ttk.Frame(dialog)
         dest_frame.pack(fill=tk.X, padx=20, pady=10)
@@ -906,9 +1107,6 @@ class MusicPlaylistManager:
         
         def create_playlist():
             playlist_name = playlist_name_var.get().strip()
-            if not playlist_name:
-                messagebox.showerror("Error", "Please enter a playlist name")
-                return
             
             if not destination['path']:
                 messagebox.showerror("Error", "Please select a destination")
@@ -927,15 +1125,18 @@ class MusicPlaylistManager:
                 
                 if playlist_type.get() == "folder":
                     # Create folder and copy files
-                    playlist_dir = Path(destination['path']) / playlist_name
-                    
-                    if playlist_dir.exists():
-                        if not messagebox.askyesno("Confirm", 
-                                                   f"Folder '{playlist_name}' already exists. Overwrite?"):
-                            return
-                        shutil.rmtree(playlist_dir)
-                    
-                    playlist_dir.mkdir(parents=True)
+                    if playlist_name:
+                        playlist_dir = Path(destination['path']) / playlist_name
+                        if playlist_dir.exists():
+                            if not messagebox.askyesno("Confirm", 
+                                                       f"Folder '{playlist_name}' already exists. Overwrite?"):
+                                return
+                            shutil.rmtree(playlist_dir)
+                        playlist_dir.mkdir(parents=True)
+                        folder_label = f"'{playlist_name}'"
+                    else:
+                        playlist_dir = Path(destination['path'])
+                        folder_label = "destination folder"
                     
                     # Create progress dialog
                     progress_dialog = tk.Toplevel(dialog)
@@ -950,7 +1151,7 @@ class MusicPlaylistManager:
                     y = dialog.winfo_y() + (dialog.winfo_height() // 2) - (progress_dialog.winfo_height() // 2)
                     progress_dialog.geometry(f"+{x}+{y}")
 
-                    ttk.Label(progress_dialog, text=f"Copying files to '{playlist_name}'...",
+                    ttk.Label(progress_dialog, text=f"Copying files to {folder_label}...",
                              font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
 
                     progress_label = ttk.Label(progress_dialog, text=f"0 / {len(songs)}")
@@ -963,12 +1164,25 @@ class MusicPlaylistManager:
                     current_file_label.pack(pady=5)
                     
                     copied = 0
+                    index_digits = len(str(len(songs)))
+                    timestamp_base = datetime.now().strftime("_%Y%m%d%H%M%S") if add_timestamp_var.get() else ""
+                    
                     for idx, song in enumerate(songs):
                         source = Path(self.music_root) / song['relative_path']
-                        destination_file = playlist_dir / song['filename']
+                        if timestamp_base:
+                            index_str = str(idx + 1).zfill(index_digits)
+                            timestamp_str = f"{timestamp_base}_{index_str}"
+                            if '.' in song['filename']:
+                                name, ext = song['filename'].rsplit('.', 1)
+                                new_filename = f"{name}{timestamp_str}.{ext}"
+                            else:
+                                new_filename = f"{song['filename']}{timestamp_str}"
+                        else:
+                            new_filename = song['filename']
+                        destination_file = playlist_dir / new_filename
                         
                         progress_label.config(text=f"{idx + 1} / {len(songs)}")
-                        current_file_label.config(text=f"Copying: {song['filename']}")
+                        current_file_label.config(text=f"Copying: {new_filename}")
                         progress_dialog.update()
 
                         try:
@@ -982,8 +1196,11 @@ class MusicPlaylistManager:
                     
                     progress_dialog.destroy()
                     
-                    messagebox.showinfo("Success", 
-                                       f"Created playlist folder with {copied} files at:\n{playlist_dir}")
+                    if playlist_name:
+                        msg = f"Created playlist folder with {copied} files at:\n{playlist_dir}"
+                    else:
+                        msg = f"Copied {copied} files to:\n{playlist_dir}"
+                    messagebox.showinfo("Success", msg)
                 
                 elif playlist_type.get() == "m3u":
                     # Create M3U playlist
@@ -1534,6 +1751,7 @@ class MusicPlaylistManager:
         """Load selected song tags for editing"""
         selection = self.library_tree.selection()
         if selection:
+            self.bulk_edit_ids = [self.library_tree.item(item)['text'] for item in selection]
             item = self.library_tree.item(selection[0])
             song_id = item['text']
             tags = item['values'][4]
@@ -2011,8 +2229,19 @@ class MusicPlaylistManager:
             return []
     
     def update_tags(self):
-        """Update tags for selected song"""
-        # Get the currently selected song if current_edit_id is not set
+        """Update tags for selected song(s)"""
+        new_tags = self.tag_edit_var.get()
+        
+        bulk_ids = getattr(self, 'bulk_edit_ids', None)
+        if bulk_ids and len(bulk_ids) > 1:
+            for song_id in bulk_ids:
+                self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", (new_tags, song_id))
+            self.conn.commit()
+            self.bulk_edit_ids = None
+            self.current_edit_id = None
+            self.update_library_list()
+            return
+        
         if not hasattr(self, 'current_edit_id') or self.current_edit_id is None:
             selection = self.library_tree.selection()
             if not selection:
@@ -2021,23 +2250,19 @@ class MusicPlaylistManager:
             item = self.library_tree.item(selection[0])
             self.current_edit_id = item['text']
             
-        new_tags = self.tag_edit_var.get()
         self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", 
                            (new_tags, self.current_edit_id))
         self.conn.commit()
         
-        # Store the current song ID to restore selection after update
         updated_song_id = self.current_edit_id
         
-        # Update the library list
         self.update_library_list()
         
-        # Restore the selection to the updated song
         for item in self.library_tree.get_children():
             item_data = self.library_tree.item(item)
             if item_data['text'] == str(updated_song_id):
                 self.library_tree.selection_set(item)
-                self.library_tree.see(item)  # Scroll to the item if needed
+                self.library_tree.see(item)
                 break
             
     def on_tag_entry_change(self, *args):
