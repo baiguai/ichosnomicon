@@ -49,6 +49,7 @@ class MusicPlaylistManager:
         self.root.bind('<Control-a>', lambda e: self.select_all())
         self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
         self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
+        self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -58,6 +59,7 @@ class MusicPlaylistManager:
         self.song_length = 0
         self.is_seeking = False  # Flag to prevent update loop during manual seek
         self.song_start_time = 0  # Track when song started for accurate positioning
+        self._wav_sound = None  # Sound object for WAV playback
         
         # App directory - use script location even when frozen by PyInstaller
         if getattr(sys, 'frozen', False):
@@ -193,8 +195,11 @@ class MusicPlaylistManager:
     
     def quit_app(self):
         """Cleanly close the application"""
-        if PYGAME_AVAILABLE and self.is_playing:
-            pygame.mixer.music.stop()
+        if PYGAME_AVAILABLE:
+            if self._wav_sound is not None:
+                self._wav_sound.stop()
+            elif self.is_playing:
+                pygame.mixer.music.stop()
         if self.conn:
             self.conn.close()
         self.root.quit()
@@ -275,6 +280,62 @@ class MusicPlaylistManager:
         """Clear all selections"""
         self.library_tree.selection_remove(self.library_tree.selection())
         self.update_selection_count()
+
+    def show_help(self):
+        """Show keyboard shortcuts help dialog"""
+        shortcuts = [
+            ("Ctrl+Q", "Quit application"),
+            ("Ctrl+O", "Select music root directory"),
+            ("Ctrl+F", "Focus search field"),
+            ("Ctrl+N", "Scan directory"),
+            ("Ctrl+P", "Create playlist"),
+            ("Ctrl+Shift+P", "Play / Stop selected song"),
+            ("Ctrl+A", "Select all"),
+            ("Ctrl+Shift+C", "Copy file path"),
+            ("Ctrl+Shift+T", "Edit tags"),
+            ("Delete", "Delete selected file(s)"),
+            ("F2", "Rename selected file"),
+            ("F5", "Refresh library list"),
+            ("Escape", "Clear selection"),
+        ]
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Keyboard Shortcuts")
+        dialog.geometry("450x350")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Keyboard Shortcuts",
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=15)
+
+        frame = ttk.Frame(dialog)
+        frame.pack(fill=tk.BOTH, expand=True, padx=20)
+
+        canvas = tk.Canvas(frame, bg=self.colors['bg'], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=inner, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        for key, desc in shortcuts:
+            row = ttk.Frame(inner)
+            row.pack(fill=tk.X, pady=3)
+            ttk.Label(row, text=key, font=('TkDefaultFont', 9, 'bold'),
+                     foreground=self.colors['accent']).pack(side=tk.LEFT, padx=(0, 15))
+            ttk.Label(row, text=desc).pack(side=tk.LEFT)
+
+        close_btn = ttk.Button(dialog, text="Close", command=dialog.destroy, width=15)
+        close_btn.pack(pady=15)
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
     
     def load_database(self):
         """Load or create database in the music root directory"""
@@ -418,6 +479,13 @@ class MusicPlaylistManager:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         self.create_library_view(main_frame)
+
+        # Bottom bar with help button
+        bottom_frame = ttk.Frame(self.root)
+        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
+        help_btn = ttk.Button(bottom_frame, text="?", width=3,
+                              command=self.show_help)
+        help_btn.pack(side=tk.RIGHT, padx=5, pady=2)
         
     def create_library_view(self, parent):
         """Create the library management view"""
@@ -653,42 +721,53 @@ class MusicPlaylistManager:
             return
         
         try:
-            # Load and play the audio file
-            pygame.mixer.music.load(str(file_path))
-            pygame.mixer.music.set_volume(self.current_volume)
-            pygame.mixer.music.play()
-            
-            # Get song length
-            try:
-                if MUTAGEN_AVAILABLE:
-                    audio_file = MutagenFile(file_path)
-                    if audio_file is not None and hasattr(audio_file, 'info'):
-                        self.song_length = audio_file.info.length
+            is_wav = file_path.suffix.lower() == '.wav'
+
+            if is_wav:
+                self._wav_sound = pygame.mixer.Sound(str(file_path))
+                self._wav_sound.set_volume(self.current_volume)
+                self._wav_sound.play()
+                self.song_length = self._wav_sound.get_length()
+                self.song_start_time = 0
+            else:
+                pygame.mixer.music.load(str(file_path))
+                pygame.mixer.music.set_volume(self.current_volume)
+                pygame.mixer.music.play()
+
+                # Get song length
+                try:
+                    if MUTAGEN_AVAILABLE:
+                        audio_file = MutagenFile(file_path)
+                        if audio_file is not None and hasattr(audio_file, 'info'):
+                            self.song_length = audio_file.info.length
+                        else:
+                            self.song_length = 0
                     else:
                         self.song_length = 0
-                else:
+                except:
                     self.song_length = 0
-            except:
-                self.song_length = 0
-           
-            self.song_start_time = 0
+                self.song_start_time = 0
+
             self.is_playing = True
             self.currently_playing = song_id
             self.play_button.config(text="⏸ Stop")
             self.now_playing_label.config(text=f"♪ {filename}")
-            
+
             # Enable seek bar and start updating it
-            if self.song_length > 0:
+            if self.song_length > 0 and not is_wav:
                 self.seek_slider.config(state='normal')
                 self.seek_slider.set(0)
-                # Initialize time label
                 total_time = self.format_time(self.song_length)
                 self.time_label.config(text=f"0:00 / {total_time}")
                 self.update_seek_bar()
             else:
                 self.seek_slider.config(state='disabled')
-                self.time_label.config(text="--:-- / --:--")
-            
+                if self.song_length > 0:
+                    total_time = self.format_time(self.song_length)
+                    self.time_label.config(text=f"0:00 / {total_time}")
+                else:
+                    self.time_label.config(text="--:-- / --:--")
+
             # Check when song finishes playing
             self.check_playback_status()
             
@@ -698,14 +777,19 @@ class MusicPlaylistManager:
     
     def stop_playback(self):
         """Stop audio playback"""
-        if PYGAME_AVAILABLE and self.is_playing:
-            pygame.mixer.music.stop()
+        if PYGAME_AVAILABLE:
+            if self._wav_sound is not None:
+                self._wav_sound.stop()
+                self._wav_sound = None
+            elif self.is_playing:
+                pygame.mixer.music.stop()
         
         self.is_playing = False
         self.currently_playing = None
         self.song_length = 0
         self.song_start_time = 0
         self.is_seeking = False
+        self._wav_sound = None
         self.play_button.config(text="▶ Play")
         self.now_playing_label.config(text="")
         self.seek_slider.config(state='disabled')
@@ -715,11 +799,20 @@ class MusicPlaylistManager:
     def check_playback_status(self):
         """Check if audio is still playing and update UI accordingly"""
         if self.is_playing:
-            if not pygame.mixer.music.get_busy():
-                # Song finished playing
+            still_playing = False
+            if self._wav_sound is not None:
+                # Check all channels for this sound
+                for i in range(pygame.mixer.get_num_channels()):
+                    ch = pygame.mixer.Channel(i)
+                    if ch.get_sound() == self._wav_sound:
+                        still_playing = True
+                        break
+            else:
+                still_playing = pygame.mixer.music.get_busy()
+
+            if not still_playing:
                 self.stop_playback()
             else:
-                # Check again in 100ms
                 self.root.after(100, self.check_playback_status)
 
     def on_seek(self, value):
@@ -817,6 +910,8 @@ class MusicPlaylistManager:
             self.current_volume = float(value) / 100
             self.volume_label.config(text=f"{int(float(value))}%")
             pygame.mixer.music.set_volume(self.current_volume)
+            if self._wav_sound is not None:
+                self._wav_sound.set_volume(self.current_volume)
 
     def create_playlist_dialog(self):
         """Show dialog to create a playlist from selected songs"""
