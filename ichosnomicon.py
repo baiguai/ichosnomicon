@@ -50,6 +50,7 @@ class MusicPlaylistManager:
         self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
         self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
         self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
+        self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -290,6 +291,7 @@ class MusicPlaylistManager:
             ("Ctrl+N", "Scan directory"),
             ("Ctrl+P", "Create playlist"),
             ("Ctrl+Shift+P", "Play / Stop selected song"),
+            ("Ctrl+Shift+L", "Show loop/BPM info"),
             ("Ctrl+A", "Select all"),
             ("Ctrl+Shift+C", "Copy file path"),
             ("Ctrl+Shift+T", "Edit tags"),
@@ -336,7 +338,105 @@ class MusicPlaylistManager:
         close_btn = ttk.Button(dialog, text="Close", command=dialog.destroy, width=15)
         close_btn.pack(pady=15)
         dialog.bind('<Escape>', lambda e: dialog.destroy())
-    
+
+    def show_loop_info(self):
+        """Show loop/BPM info for the selected file"""
+        selection = self.library_tree.selection()
+        if not selection:
+            messagebox.showwarning("No Selection", "Please select a song first")
+            return
+
+        item = self.library_tree.item(selection[0])
+        song_id = item['text']
+        filename = item['values'][0]
+
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            messagebox.showerror("Error", "Song not found in database")
+            return
+
+        file_path = Path(self.music_root) / row[0]
+        if not file_path.exists():
+            messagebox.showerror("Error", f"File not found: {file_path}")
+            return
+
+        duration = 0
+        if MUTAGEN_AVAILABLE:
+            try:
+                audio_file = MutagenFile(file_path)
+                if audio_file is not None and hasattr(audio_file, 'info'):
+                    duration = audio_file.info.length
+            except:
+                pass
+
+        if duration <= 0:
+            messagebox.showerror("Error", "Could not determine file duration")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Loop / BPM Info")
+        dialog.geometry("420x280")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Loop Information",
+                 font=('TkDefaultFont', 12, 'bold')).pack(pady=10)
+
+        info_frame = ttk.Frame(dialog)
+        info_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=5)
+
+        ttk.Label(info_frame, text=f"File: {filename}",
+                 font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W)
+
+        dur_min = int(duration // 60)
+        dur_sec = int(duration % 60)
+        ttk.Label(info_frame, text=f"Duration: {dur_min}:{dur_sec:02d}").pack(anchor=tk.W, pady=(5, 10))
+
+        is_long = duration > 30
+        if is_long:
+            warn_frame = ttk.Frame(info_frame)
+            warn_frame.pack(fill=tk.X, pady=(0, 10))
+            warn_label = ttk.Label(warn_frame,
+                text="⚠ This file is over 30 seconds long and is likely\na full song, not a loop sample.",
+                foreground='#ffcc00', justify=tk.LEFT)
+            warn_label.pack(anchor=tk.W)
+
+        ttk.Separator(info_frame, orient='horizontal').pack(fill=tk.X, pady=5)
+
+        bpm_frame = ttk.Frame(info_frame)
+        bpm_frame.pack(fill=tk.X)
+
+        ttk.Label(bpm_frame, text="If this is a loop in 4/4 time:",
+                 font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+
+        measures = [
+            (1, duration / 4),
+            (2, duration / 8),
+            (4, duration / 16),
+        ]
+
+        for num_beats, beat_duration in [(4, duration), (8, duration), (16, duration)]:
+            measures_count = num_beats // 4
+            bpm = round((num_beats * 60) / duration)
+            row_frame = ttk.Frame(bpm_frame)
+            row_frame.pack(fill=tk.X, pady=2)
+            ttk.Label(row_frame,
+                     text=f"{measures_count} measure{'s' if measures_count > 1 else ''}:",
+                     width=14, anchor=tk.W).pack(side=tk.LEFT)
+            ttk.Label(row_frame, text=f"{bpm} BPM",
+                     foreground=self.colors['accent'],
+                     font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=15)
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
     def load_database(self):
         """Load or create database in the music root directory"""
         if not self.music_root:
@@ -1007,9 +1107,6 @@ class MusicPlaylistManager:
         
         def create_playlist():
             playlist_name = playlist_name_var.get().strip()
-            if not playlist_name:
-                messagebox.showerror("Error", "Please enter a playlist name")
-                return
             
             if not destination['path']:
                 messagebox.showerror("Error", "Please select a destination")
@@ -1028,15 +1125,18 @@ class MusicPlaylistManager:
                 
                 if playlist_type.get() == "folder":
                     # Create folder and copy files
-                    playlist_dir = Path(destination['path']) / playlist_name
-                    
-                    if playlist_dir.exists():
-                        if not messagebox.askyesno("Confirm", 
-                                                   f"Folder '{playlist_name}' already exists. Overwrite?"):
-                            return
-                        shutil.rmtree(playlist_dir)
-                    
-                    playlist_dir.mkdir(parents=True)
+                    if playlist_name:
+                        playlist_dir = Path(destination['path']) / playlist_name
+                        if playlist_dir.exists():
+                            if not messagebox.askyesno("Confirm", 
+                                                       f"Folder '{playlist_name}' already exists. Overwrite?"):
+                                return
+                            shutil.rmtree(playlist_dir)
+                        playlist_dir.mkdir(parents=True)
+                        folder_label = f"'{playlist_name}'"
+                    else:
+                        playlist_dir = Path(destination['path'])
+                        folder_label = "destination folder"
                     
                     # Create progress dialog
                     progress_dialog = tk.Toplevel(dialog)
@@ -1051,7 +1151,7 @@ class MusicPlaylistManager:
                     y = dialog.winfo_y() + (dialog.winfo_height() // 2) - (progress_dialog.winfo_height() // 2)
                     progress_dialog.geometry(f"+{x}+{y}")
 
-                    ttk.Label(progress_dialog, text=f"Copying files to '{playlist_name}'...",
+                    ttk.Label(progress_dialog, text=f"Copying files to {folder_label}...",
                              font=('TkDefaultFont', 10, 'bold')).pack(pady=10)
 
                     progress_label = ttk.Label(progress_dialog, text=f"0 / {len(songs)}")
@@ -1063,12 +1163,15 @@ class MusicPlaylistManager:
                     current_file_label = ttk.Label(progress_dialog, text="", wraplength=450)
                     current_file_label.pack(pady=5)
                     
-                    timestamp_str = datetime.now().strftime("_%Y%m%d%H%M%S") if add_timestamp_var.get() else ""
-                    
                     copied = 0
+                    index_digits = len(str(len(songs)))
+                    timestamp_base = datetime.now().strftime("_%Y%m%d%H%M%S") if add_timestamp_var.get() else ""
+                    
                     for idx, song in enumerate(songs):
                         source = Path(self.music_root) / song['relative_path']
-                        if timestamp_str:
+                        if timestamp_base:
+                            index_str = str(idx + 1).zfill(index_digits)
+                            timestamp_str = f"{timestamp_base}_{index_str}"
                             if '.' in song['filename']:
                                 name, ext = song['filename'].rsplit('.', 1)
                                 new_filename = f"{name}{timestamp_str}.{ext}"
@@ -1093,8 +1196,11 @@ class MusicPlaylistManager:
                     
                     progress_dialog.destroy()
                     
-                    messagebox.showinfo("Success", 
-                                       f"Created playlist folder with {copied} files at:\n{playlist_dir}")
+                    if playlist_name:
+                        msg = f"Created playlist folder with {copied} files at:\n{playlist_dir}"
+                    else:
+                        msg = f"Copied {copied} files to:\n{playlist_dir}"
+                    messagebox.showinfo("Success", msg)
                 
                 elif playlist_type.get() == "m3u":
                     # Create M3U playlist
