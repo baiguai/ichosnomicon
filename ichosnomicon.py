@@ -479,13 +479,6 @@ class MusicPlaylistManager:
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         self.create_library_view(main_frame)
-
-        # Bottom bar with help button
-        bottom_frame = ttk.Frame(self.root)
-        bottom_frame.pack(fill=tk.X, side=tk.BOTTOM)
-        help_btn = ttk.Button(bottom_frame, text="?", width=3,
-                              command=self.show_help)
-        help_btn.pack(side=tk.RIGHT, padx=5, pady=2)
         
     def create_library_view(self, parent):
         """Create the library management view"""
@@ -629,7 +622,11 @@ class MusicPlaylistManager:
                    command=self.update_tags).pack(side=tk.LEFT)
         ttk.Button(edit_frame, text="Bulk Edit Tags", 
                    command=self.bulk_edit_tags_dialog).pack(side=tk.LEFT, padx=5)
-    
+
+        ttk.Frame(edit_frame).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(edit_frame, text=" ? ", width=4,
+                   command=self.show_help).pack(side=tk.RIGHT)
+
     def update_selection_count(self, event=None):
         """Update the selection count label"""
         selected = len(self.library_tree.selection())
