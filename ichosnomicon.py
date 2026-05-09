@@ -1553,6 +1553,7 @@ class MusicPlaylistManager:
         """Load selected song tags for editing"""
         selection = self.library_tree.selection()
         if selection:
+            self.bulk_edit_ids = [self.library_tree.item(item)['text'] for item in selection]
             item = self.library_tree.item(selection[0])
             song_id = item['text']
             tags = item['values'][4]
@@ -2030,8 +2031,19 @@ class MusicPlaylistManager:
             return []
     
     def update_tags(self):
-        """Update tags for selected song"""
-        # Get the currently selected song if current_edit_id is not set
+        """Update tags for selected song(s)"""
+        new_tags = self.tag_edit_var.get()
+        
+        bulk_ids = getattr(self, 'bulk_edit_ids', None)
+        if bulk_ids and len(bulk_ids) > 1:
+            for song_id in bulk_ids:
+                self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", (new_tags, song_id))
+            self.conn.commit()
+            self.bulk_edit_ids = None
+            self.current_edit_id = None
+            self.update_library_list()
+            return
+        
         if not hasattr(self, 'current_edit_id') or self.current_edit_id is None:
             selection = self.library_tree.selection()
             if not selection:
@@ -2040,23 +2052,19 @@ class MusicPlaylistManager:
             item = self.library_tree.item(selection[0])
             self.current_edit_id = item['text']
             
-        new_tags = self.tag_edit_var.get()
         self.cursor.execute("UPDATE songs SET tags = ? WHERE id = ?", 
                            (new_tags, self.current_edit_id))
         self.conn.commit()
         
-        # Store the current song ID to restore selection after update
         updated_song_id = self.current_edit_id
         
-        # Update the library list
         self.update_library_list()
         
-        # Restore the selection to the updated song
         for item in self.library_tree.get_children():
             item_data = self.library_tree.item(item)
             if item_data['text'] == str(updated_song_id):
                 self.library_tree.selection_set(item)
-                self.library_tree.see(item)  # Scroll to the item if needed
+                self.library_tree.see(item)
                 break
             
     def on_tag_entry_change(self, *args):
