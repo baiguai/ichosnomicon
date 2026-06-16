@@ -376,7 +376,7 @@ class MusicPlaylistManager:
 
         dialog = tk.Toplevel(self.root)
         dialog.title("Loop / BPM Info")
-        dialog.geometry("420x280")
+        dialog.geometry("550x380")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(bg=self.colors['bg'])
@@ -416,11 +416,8 @@ class MusicPlaylistManager:
         ttk.Label(bpm_frame, text="If this is a loop in 4/4 time:",
                  font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
 
-        measures = [
-            (1, duration / 4),
-            (2, duration / 8),
-            (4, duration / 16),
-        ]
+        note_lengths = [('1/1', 4), ('1/2', 2), ('1/4', 1), ('1/8', 0.5),
+                        ('1/16', 0.25), ('1/32', 0.125), ('1/64', 0.0625)]
 
         for num_beats, beat_duration in [(4, duration), (8, duration), (16, duration)]:
             measures_count = num_beats // 4
@@ -433,6 +430,14 @@ class MusicPlaylistManager:
             ttk.Label(row_frame, text=f"{bpm} BPM",
                      foreground=self.colors['accent'],
                      font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+
+            beat_sec = 60 / bpm
+            note_frame = ttk.Frame(bpm_frame)
+            note_frame.pack(fill=tk.X, pady=(0, 2), padx=(14, 0))
+            note_text = "  ".join(f"{nl}:{beat_sec * beats:.3f}s" for nl, beats in note_lengths)
+            ttk.Label(note_frame, text=note_text,
+                     font=('TkDefaultFont', 8),
+                     foreground='#888888').pack(anchor=tk.W)
 
         ttk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=15)
         dialog.bind('<Escape>', lambda e: dialog.destroy())
@@ -486,11 +491,17 @@ class MusicPlaylistManager:
         
     def load_config(self):
         """Load configuration including music root directory"""
+        self.last_root_dir = ''
+        self.last_playlist_dir = ''
+        self.last_export_dir = ''
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
                     config = json.load(f)
                     self.music_root = config.get('music_root')
+                    self.last_root_dir = config.get('last_root_dir', '')
+                    self.last_playlist_dir = config.get('last_playlist_dir', '')
+                    self.last_export_dir = config.get('last_export_dir', '')
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load config file: {e}")
                 print("Creating new config file...")
@@ -504,7 +515,12 @@ class MusicPlaylistManager:
                 
     def save_config(self):
         """Save configuration"""
-        config = {'music_root': self.music_root}
+        config = {
+            'music_root': self.music_root,
+            'last_root_dir': self.last_root_dir,
+            'last_playlist_dir': self.last_playlist_dir,
+            'last_export_dir': self.last_export_dir,
+        }
         with open(self.config_path, 'w') as f:
             json.dump(config, f)
             
@@ -1080,16 +1096,20 @@ class MusicPlaylistManager:
         
         def select_dest():
             if playlist_type.get() == "folder":
-                path = filedialog.askdirectory(title="Select Destination Folder")
+                path = filedialog.askdirectory(title="Select Destination Folder",
+                                               initialdir=self.last_playlist_dir or None)
             else:
                 path = filedialog.asksaveasfilename(
                     title="Save Playlist File",
+                    initialdir=self.last_playlist_dir or None,
                     defaultextension=f".{playlist_type.get()}",
                     filetypes=[(f"{playlist_type.get().upper()} Files", f"*.{playlist_type.get()}")]
                 )
             
             if path:
                 destination['path'] = path
+                self.last_playlist_dir = path if playlist_type.get() == "folder" else str(Path(path).parent)
+                self.save_config()
                 dest_label.config(text=path, foreground=self.colors['accent'])
         
         ttk.Button(dest_frame, text="Browse...", command=select_dest).pack(side=tk.LEFT)
@@ -1343,11 +1363,14 @@ class MusicPlaylistManager:
             
             export_path = filedialog.asksaveasfilename(
                 title="Export Playlist",
+                initialdir=self.last_export_dir or None,
                 defaultextension=".json",
                 filetypes=[("JSON Files", "*.json"), ("All Files", "*.*")]
             )
             
             if export_path:
+                self.last_export_dir = str(Path(export_path).parent)
+                self.save_config()
                 try:
                     import shutil
                     shutil.copy2(playlist_path, export_path)
@@ -1499,9 +1522,11 @@ class MusicPlaylistManager:
         
     def select_root(self):
         """Select the music root directory"""
-        directory = filedialog.askdirectory(title="Select Music Root Directory")
+        directory = filedialog.askdirectory(title="Select Music Root Directory",
+                                            initialdir=self.last_root_dir or None)
         if directory:
             self.music_root = directory
+            self.last_root_dir = directory
             self.root_label.config(text=directory)
             self.save_config()
             self.load_database()
@@ -1706,8 +1731,9 @@ class MusicPlaylistManager:
 
         # If path filter is used, only apply path filter
         if path_filter:
+            like_pattern = path_filter.replace('*', '%').replace('?', '_')
             conditions.append("LOWER(relative_path) LIKE ?")
-            params.append(f"{path_filter}%")
+            params.append(like_pattern)
         else:
             # Otherwise apply all other filters
             if search_term:
