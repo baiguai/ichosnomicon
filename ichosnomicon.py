@@ -376,7 +376,7 @@ class MusicPlaylistManager:
 
         dialog = tk.Toplevel(self.root)
         dialog.title("Loop / BPM Info")
-        dialog.geometry("420x280")
+        dialog.geometry("550x380")
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.configure(bg=self.colors['bg'])
@@ -416,11 +416,8 @@ class MusicPlaylistManager:
         ttk.Label(bpm_frame, text="If this is a loop in 4/4 time:",
                  font=('TkDefaultFont', 9, 'bold')).pack(anchor=tk.W, pady=(0, 5))
 
-        measures = [
-            (1, duration / 4),
-            (2, duration / 8),
-            (4, duration / 16),
-        ]
+        note_lengths = [('1/1', 4), ('1/2', 2), ('1/4', 1), ('1/8', 0.5),
+                        ('1/16', 0.25), ('1/32', 0.125), ('1/64', 0.0625)]
 
         for num_beats, beat_duration in [(4, duration), (8, duration), (16, duration)]:
             measures_count = num_beats // 4
@@ -433,6 +430,14 @@ class MusicPlaylistManager:
             ttk.Label(row_frame, text=f"{bpm} BPM",
                      foreground=self.colors['accent'],
                      font=('TkDefaultFont', 9, 'bold')).pack(side=tk.LEFT, padx=5)
+
+            beat_sec = 60 / bpm
+            note_frame = ttk.Frame(bpm_frame)
+            note_frame.pack(fill=tk.X, pady=(0, 2), padx=(14, 0))
+            note_text = "  ".join(f"{nl}:{beat_sec * beats:.3f}s" for nl, beats in note_lengths)
+            ttk.Label(note_frame, text=note_text,
+                     font=('TkDefaultFont', 8),
+                     foreground='#888888').pack(anchor=tk.W)
 
         ttk.Button(dialog, text="Close", command=dialog.destroy, width=15).pack(pady=15)
         dialog.bind('<Escape>', lambda e: dialog.destroy())
@@ -1706,8 +1711,9 @@ class MusicPlaylistManager:
 
         # If path filter is used, only apply path filter
         if path_filter:
+            like_pattern = path_filter.replace('*', '%').replace('?', '_')
             conditions.append("LOWER(relative_path) LIKE ?")
-            params.append(f"{path_filter}%")
+            params.append(like_pattern)
         else:
             # Otherwise apply all other filters
             if search_term:
