@@ -4,6 +4,7 @@ import sqlite3
 import os
 import sys
 import shutil
+import fnmatch
 from pathlib import Path
 import json
 from datetime import datetime
@@ -1889,6 +1890,37 @@ class MusicPlaylistManager:
                       f"Removed {deleted_count} deleted files."
         messagebox.showinfo("Scan Summary", summary_msg)
         
+    @staticmethod
+    def matches_path_filter(relative_path, path_filter):
+        """Check whether a song's path matches the path filter.
+
+        Plain text is matched as a case-insensitive substring. Wildcards
+        (*, ? and [seq]) use glob matching, and a directory pattern also
+        matches songs in its subdirectories.
+        """
+        pattern = path_filter.replace('\\', '/').strip('/').lower()
+        if not pattern:
+            return True
+
+        relative_path = relative_path.replace('\\', '/')
+        parent_path = str(Path(relative_path).parent).replace('\\', '/')
+        if parent_path == '.':
+            parent_path = ''
+
+        candidates = {relative_path.lower(), parent_path.lower()}
+        if not parent_path:
+            candidates.add('(root)')
+
+        if not any(ch in pattern for ch in '*?['):
+            return any(pattern in candidate for candidate in candidates)
+
+        for candidate in candidates:
+            if fnmatch.fnmatchcase(candidate, pattern):
+                return True
+            if fnmatch.fnmatchcase(candidate, pattern.rstrip('/') + '/*'):
+                return True
+        return False
+
     def update_library_list(self):
         """Update the library list based on search filters"""
         if not self.conn:
@@ -1911,11 +1943,7 @@ class MusicPlaylistManager:
             conditions.append("filename IN (SELECT filename FROM songs GROUP BY filename HAVING COUNT(*) > 1)")
 
         # If path filter is used, only apply path filter
-        if path_filter:
-            like_pattern = path_filter.replace('*', '%').replace('?', '_')
-            conditions.append("LOWER(relative_path) LIKE ?")
-            params.append(like_pattern)
-        else:
+        if not path_filter:
             # Otherwise apply all other filters
             if search_term:
                 conditions.append("LOWER(filename) LIKE ?")
@@ -1934,8 +1962,13 @@ class MusicPlaylistManager:
             query += " WHERE " + " AND ".join(conditions)
             
         self.cursor.execute(query, params)
+        rows = self.cursor.fetchall()
+
+        if path_filter:
+            rows = [row for row in rows
+                    if self.matches_path_filter(row[2], path_filter)]
         
-        for row in self.cursor.fetchall():
+        for row in rows:
             song_id, filename, relative_path, artist, album, tags = row
             # Extract parent directory path without filename
             parent_path = str(Path(relative_path).parent)
