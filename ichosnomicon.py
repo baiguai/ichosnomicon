@@ -494,6 +494,7 @@ class MusicPlaylistManager:
         self.last_root_dir = ''
         self.last_playlist_dir = ''
         self.last_export_dir = ''
+        self.recent_roots = []
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
@@ -502,6 +503,9 @@ class MusicPlaylistManager:
                     self.last_root_dir = config.get('last_root_dir', '')
                     self.last_playlist_dir = config.get('last_playlist_dir', '')
                     self.last_export_dir = config.get('last_export_dir', '')
+                    recent_roots = config.get('recent_roots', [])
+                    if isinstance(recent_roots, list):
+                        self.recent_roots = [r for r in recent_roots if isinstance(r, str)]
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load config file: {e}")
                 print("Creating new config file...")
@@ -512,7 +516,10 @@ class MusicPlaylistManager:
                     print(f"Backed up corrupted config to: {backup_path}")
                 # Initialize with default values
                 self.music_root = None
-                
+
+        if self.music_root and self.music_root not in self.recent_roots:
+            self.recent_roots.insert(0, self.music_root)
+
     def save_config(self):
         """Save configuration"""
         config = {
@@ -520,6 +527,7 @@ class MusicPlaylistManager:
             'last_root_dir': self.last_root_dir,
             'last_playlist_dir': self.last_playlist_dir,
             'last_export_dir': self.last_export_dir,
+            'recent_roots': self.recent_roots,
         }
         with open(self.config_path, 'w') as f:
             json.dump(config, f)
@@ -538,6 +546,14 @@ class MusicPlaylistManager:
         
         ttk.Button(top_frame, text="Select Root", 
                    command=self.select_root).pack(side=tk.LEFT)
+        self.recent_roots_menu = tk.Menu(self.root, tearoff=0,
+                                         bg=self.colors['button_bg'],
+                                         fg=self.colors['fg'],
+                                         activebackground=self.colors['accent'],
+                                         activeforeground=self.colors['select_fg'])
+        self.recent_roots_button = ttk.Button(top_frame, text="▼", width=3,
+                                              command=self.show_recent_roots_menu)
+        self.recent_roots_button.pack(side=tk.LEFT, padx=(2, 0))
         ttk.Button(top_frame, text="Add Files", 
                    command=self.add_files).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_frame, text="Scan Directory", 
@@ -1527,25 +1543,77 @@ class MusicPlaylistManager:
         directory = filedialog.askdirectory(title="Select Music Root Directory",
                                             initialdir=self.last_root_dir or None)
         if directory:
-            self.music_root = directory
-            self.last_root_dir = directory
-            self.root_label.config(text=directory)
+            self.set_root(directory)
+
+    def set_root(self, directory, show_messages=True):
+        """Set the music root directory and load its database"""
+        self.music_root = directory
+        self.last_root_dir = directory
+        self.add_recent_root(directory)
+        self.root_label.config(text=directory)
+        self.save_config()
+        self.load_database()
+        self.update_library_list()
+
+        if not show_messages:
+            return
+
+        # Check if database has songs
+        self.cursor.execute("SELECT COUNT(*) FROM songs")
+        count = self.cursor.fetchone()[0]
+
+        if count > 0:
+            messagebox.showinfo("Database Loaded",
+                              f"Loaded existing database with {count} songs.\n"
+                              "Your tags and data have been preserved!")
+        else:
+            messagebox.showinfo("New Database",
+                              "New database created. Click 'Scan Directory' to add songs.")
+
+    def add_recent_root(self, directory):
+        """Move a root to the front of the recent roots list"""
+        if not directory:
+            return
+        if directory in self.recent_roots:
+            self.recent_roots.remove(directory)
+        self.recent_roots.insert(0, directory)
+        self.recent_roots = self.recent_roots[:20]
+
+    def show_recent_roots_menu(self):
+        """Show a menu of previously selected music roots"""
+        existing_roots = [path for path in self.recent_roots if os.path.isdir(path)]
+        if existing_roots != self.recent_roots:
+            self.recent_roots = existing_roots
             self.save_config()
-            self.load_database()
-            self.update_library_list()
-            
-            # Check if database has songs
-            self.cursor.execute("SELECT COUNT(*) FROM songs")
-            count = self.cursor.fetchone()[0]
-            
-            if count > 0:
-                messagebox.showinfo("Database Loaded", 
-                                  f"Loaded existing database with {count} songs.\n"
-                                  "Your tags and data have been preserved!")
-            else:
-                messagebox.showinfo("New Database", 
-                                  "New database created. Click 'Scan Directory' to add songs.")
-            
+
+        self.recent_roots_menu.delete(0, tk.END)
+        if self.recent_roots:
+            for path in self.recent_roots:
+                self.recent_roots_menu.add_command(
+                    label=path,
+                    command=lambda p=path: self.select_recent_root(p))
+        else:
+            self.recent_roots_menu.add_command(label="No recent roots",
+                                               state=tk.DISABLED)
+
+        x = self.recent_roots_button.winfo_rootx()
+        y = self.recent_roots_button.winfo_rooty() + self.recent_roots_button.winfo_height()
+        try:
+            self.recent_roots_menu.tk_popup(x, y)
+        finally:
+            self.recent_roots_menu.grab_release()
+
+    def select_recent_root(self, directory):
+        """Select a music root from the recent roots menu"""
+        if not os.path.isdir(directory):
+            messagebox.showerror("Error",
+                                 f"Directory no longer exists:\n{directory}")
+            if directory in self.recent_roots:
+                self.recent_roots.remove(directory)
+                self.save_config()
+            return
+        self.set_root(directory, show_messages=False)
+
     def extract_metadata(self, file_path):
         """Extract artist and album tags from an audio file."""
         artist = ""
