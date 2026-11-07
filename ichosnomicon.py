@@ -538,6 +538,8 @@ class MusicPlaylistManager:
         
         ttk.Button(top_frame, text="Select Root", 
                    command=self.select_root).pack(side=tk.LEFT)
+        ttk.Button(top_frame, text="Add Files", 
+                   command=self.add_files).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_frame, text="Scan Directory", 
                    command=self.scan_directory).pack(side=tk.LEFT, padx=5)
         
@@ -1544,6 +1546,149 @@ class MusicPlaylistManager:
                 messagebox.showinfo("New Database", 
                                   "New database created. Click 'Scan Directory' to add songs.")
             
+    def extract_metadata(self, file_path):
+        """Extract artist and album tags from an audio file."""
+        artist = ""
+        album = ""
+
+        if not MUTAGEN_AVAILABLE:
+            return artist, album
+
+        try:
+            audio_file = MutagenFile(file_path)
+            if audio_file is not None:
+                suffix = file_path.suffix.lower()
+                # Extract artist and album based on file type
+                if suffix == '.mp3':
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = str(audio_file.tags.get('TPE1', [''])[0])
+                        album = str(audio_file.tags.get('TALB', [''])[0])
+                elif suffix == '.flac':
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('ARTIST', [''])[0]
+                        album = audio_file.tags.get('ALBUM', [''])[0]
+                elif suffix in ['.ogg', '.oga']:
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('ARTIST', [''])[0]
+                        album = audio_file.tags.get('ALBUM', [''])[0]
+                elif suffix in ['.m4a', '.mp4']:
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('\xa9ART', [''])[0]
+                        album = audio_file.tags.get('\xa9alb', [''])[0]
+                else:
+                    try:
+                        easy_audio = EasyID3(file_path)
+                        artist = easy_audio.get('artist', [''])[0]
+                        album = easy_audio.get('album', [''])[0]
+                    except Exception:
+                        pass
+        except Exception:
+            pass  # Skip files with read errors
+
+        return artist, album
+
+    def add_files(self):
+        """Add individually selected audio files from within the music root."""
+        if not self.music_root:
+            messagebox.showerror("Error", "Please select a music root directory first")
+            return
+
+        if not os.path.exists(self.music_root):
+            messagebox.showerror("Error", "Music root directory does not exist")
+            return
+
+        music_root_path = Path(self.music_root).resolve()
+        audio_extensions = {'.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'}
+
+        selected_files = filedialog.askopenfilenames(
+            title="Select Audio Files to Add",
+            initialdir=self.music_root,
+            filetypes=[
+                ("Audio Files", "*.mp3 *.wav *.flac *.m4a *.ogg *.aac *.wma"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not selected_files:
+            return
+
+        added_count = 0
+        updated_count = 0
+        skipped_count = 0
+        outside_root = []
+        invalid_files = []
+
+        for filename in selected_files:
+            file_path = Path(filename).resolve()
+
+            # Only allow files inside the current music root and its sub-directories
+            try:
+                relative_path = str(file_path.relative_to(music_root_path))
+            except ValueError:
+                outside_root.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            if not file_path.is_file():
+                invalid_files.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            if file_path.suffix.lower() not in audio_extensions:
+                invalid_files.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            file_name = file_path.name
+            mtime = file_path.stat().st_mtime
+            artist, album = self.extract_metadata(file_path)
+
+            self.cursor.execute(
+                "SELECT id, last_modified, tags FROM songs WHERE relative_path = ?",
+                (relative_path,)
+            )
+            existing = self.cursor.fetchone()
+
+            if existing:
+                song_id, existing_mtime, existing_tags = existing
+                if mtime > (existing_mtime or 0):
+                    self.cursor.execute(
+                        "UPDATE songs SET filename = ?, tags = ?, artist = ?, album = ?, last_modified = ? WHERE id = ?",
+                        (file_name, existing_tags, artist, album, mtime, song_id)
+                    )
+                    updated_count += 1
+                else:
+                    skipped_count += 1
+            else:
+                self.cursor.execute(
+                    "INSERT INTO songs (relative_path, filename, tags, artist, album, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+                    (relative_path, file_name, "", artist, album, mtime)
+                )
+                added_count += 1
+
+        self.conn.commit()
+        self.update_library_list()
+
+        summary_msg = f"Add Files Complete:\nAdded {added_count} new files.\n" \
+                      f"Updated {updated_count} existing files.\n" \
+                      f"Skipped {skipped_count} files."
+
+        if outside_root:
+            summary_msg += "\n\nSkipped files outside the music root:"
+            for path in outside_root[:10]:
+                summary_msg += f"\n  {path}"
+            if len(outside_root) > 10:
+                summary_msg += f"\n  ... and {len(outside_root) - 10} more"
+
+        if invalid_files:
+            summary_msg += "\n\nSkipped non-audio or missing files:"
+            for path in invalid_files[:10]:
+                summary_msg += f"\n  {path}"
+            if len(invalid_files) > 10:
+                summary_msg += f"\n  ... and {len(invalid_files) - 10} more"
+
+        messagebox.showinfo("Add Files Summary", summary_msg)
+
     def scan_directory(self):
         """
         Scans the music directory for new, updated, and deleted audio files.
@@ -1624,40 +1769,8 @@ class MusicPlaylistManager:
             progress_bar['value'] = idx + 1
             progress_dialog.update()
 
-            artist = ""
-            album = ""
+            artist, album = self.extract_metadata(file_path)
             current_tags = "" # Tags are preserved if already in DB, only metadata is updated from file
-
-            if MUTAGEN_AVAILABLE:
-                try:
-                    audio_file = MutagenFile(file_path)
-                    if audio_file is not None:
-                        # Extract artist and album based on file type
-                        if file_path.suffix.lower() == '.mp3':
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = str(audio_file.tags.get('TPE1', [''])[0])
-                                album = str(audio_file.tags.get('TALB', [''])[0])
-                        elif file_path.suffix.lower() == '.flac':
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('ARTIST', [''])[0]
-                                album = audio_file.tags.get('ALBUM', [''])[0]
-                        elif file_path.suffix.lower() in ['.ogg', '.oga']:
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('ARTIST', [''])[0]
-                                album = audio_file.tags.get('ALBUM', [''])[0]
-                        elif file_path.suffix.lower() in ['.m4a', '.mp4']:
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('\xa9ART', [''])[0]
-                                album = audio_file.tags.get('\xa9alb', [''])[0]
-                        else:
-                            try:
-                                easy_audio = EasyID3(file_path)
-                                artist = easy_audio.get('artist', [''])[0]
-                                album = easy_audio.get('album', [''])[0]
-                            except:
-                                pass
-                except Exception:
-                    pass # Skip files with read errors
 
             if relative_path in db_songs:
                 # File exists in DB, check if updated
