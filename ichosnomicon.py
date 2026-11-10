@@ -5,6 +5,7 @@ import os
 import sys
 import shutil
 import fnmatch
+import threading
 from pathlib import Path
 import json
 from datetime import datetime
@@ -58,6 +59,10 @@ class MusicPlaylistManager:
         self.currently_playing = None
         self.is_playing = False
         self.current_volume = 0.7
+
+        # Selection runtime state
+        self.duration_cache = {}
+        self.duration_request_id = 0
         self.song_length = 0
         self.is_seeking = False  # Flag to prevent update loop during manual seek
         self.song_start_time = 0  # Track when song started for accurate positioning
@@ -564,8 +569,13 @@ class MusicPlaylistManager:
         ttk.Separator(top_frame, orient='vertical').pack(side=tk.LEFT, fill=tk.Y, padx=20)
         
         # Selection info
-        self.selection_label = ttk.Label(top_frame, text="0 selected")
-        self.selection_label.pack(side=tk.LEFT, padx=5)
+        selection_frame = ttk.Frame(top_frame)
+        selection_frame.pack(side=tk.LEFT, padx=5)
+        self.selection_label = ttk.Label(selection_frame, text="0 selected")
+        self.selection_label.pack(anchor=tk.W)
+        self.runtime_label = ttk.Label(selection_frame, text="", 
+                                       foreground=self.colors['accent'])
+        self.runtime_label.pack(anchor=tk.W)
         
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog).pack(side=tk.LEFT, padx=5)
@@ -763,9 +773,89 @@ class MusicPlaylistManager:
                    command=self.show_help).pack(side=tk.RIGHT)
 
     def update_selection_count(self, event=None):
-        """Update the selection count label"""
-        selected = len(self.library_tree.selection())
+        """Update the selection count and total runtime labels"""
+        selected_items = self.library_tree.selection()
+        selected = len(selected_items)
         self.selection_label.config(text=f"{selected} selected")
+        
+        if not selected:
+            self.runtime_label.config(text="")
+            return
+        
+        song_ids = [self.library_tree.item(item)['text'] for item in selected_items]
+        
+        if not MUTAGEN_AVAILABLE:
+            self.runtime_label.config(text="")
+            return
+        
+        if all(song_id in self.duration_cache for song_id in song_ids):
+            total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+            return
+        
+        self.runtime_label.config(text="Total runtime: ...")
+        self.duration_request_id += 1
+        request_id = self.duration_request_id
+        
+        # Resolve paths on the main thread (sqlite is not thread-safe)
+        paths = {}
+        for song_id in song_ids:
+            if song_id in self.duration_cache:
+                continue
+            self.cursor.execute(
+                "SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+            row = self.cursor.fetchone()
+            if row:
+                paths[song_id] = Path(self.music_root) / row[0]
+        
+        if not paths:
+            total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+            return
+        
+        thread = threading.Thread(
+            target=self._compute_selected_runtime,
+            args=(request_id, song_ids, paths),
+            daemon=True)
+        thread.start()
+    
+    def _compute_selected_runtime(self, request_id, song_ids, paths):
+        """Background worker: read durations of selected files and total them"""
+        for song_id, file_path in paths.items():
+            duration = None
+            try:
+                if file_path.exists():
+                    audio_file = MutagenFile(file_path)
+                    if audio_file is not None and hasattr(audio_file, 'info') \
+                            and hasattr(audio_file.info, 'length'):
+                        duration = audio_file.info.length
+            except Exception:
+                duration = None
+            self.duration_cache[song_id] = duration
+        
+        if request_id != self.duration_request_id:
+            return
+        
+        total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+        self.root.after(0, lambda: self._apply_runtime_label(request_id, total))
+    
+    def _apply_runtime_label(self, request_id, total):
+        """Update the runtime label if this is still the latest selection"""
+        if request_id == self.duration_request_id:
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+    
+    def format_duration(self, seconds):
+        """Format a duration in seconds as H:MM:SS or M:SS"""
+        seconds = int(round(seconds))
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        secs = seconds % 60
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
     
     def sort_column(self, col, reverse):
         """Sort treeview contents when a column header is clicked"""
