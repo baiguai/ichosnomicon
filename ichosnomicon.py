@@ -51,6 +51,7 @@ class MusicPlaylistManager:
         self.root.bind('<Control-a>', lambda e: self.select_all())
         self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
         self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
+        self.root.bind('<Control-Shift-D>', lambda e: self.show_duplicate_comparison_dialog())
         self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
         self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
@@ -220,7 +221,7 @@ class MusicPlaylistManager:
         selected_items = self.library_tree.selection()
         if not selected_items:
             return
-        
+
         if len(selected_items) == 1:
             # Use existing single file delete method
             self.delete_file()
@@ -301,6 +302,7 @@ class MusicPlaylistManager:
             ("Ctrl+A", "Select all"),
             ("Ctrl+Shift+C", "Copy file path"),
             ("Ctrl+Shift+T", "Edit tags"),
+            ("Ctrl+Shift+D", "Compare selected duplicate files"),
             ("Delete", "Delete selected file(s)"),
             ("F2", "Rename selected file"),
             ("F5", "Refresh library list"),
@@ -717,6 +719,7 @@ class MusicPlaylistManager:
         self.context_menu.add_command(label="Edit ID3 Metadata", command=self.edit_id3_metadata)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Copy File Path", command=self.copy_file_path)
+        self.context_menu.add_command(label="Copy Directory Path", command=self.copy_directory_path)
         self.context_menu.add_command(label="Delete File", command=self.delete_file)
         
         # Autocomplete frame (initially hidden)
@@ -2500,6 +2503,206 @@ class MusicPlaylistManager:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy path: {str(e)}")
     
+    def copy_directory_path(self):
+        """Copy the full path of the selected file's directory to clipboard"""
+        selection = self.library_tree.selection()
+        if not selection:
+            return
+        
+        item = self.library_tree.item(selection[0])
+        song_id = item['text']
+        
+        # Get the file path from database
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            messagebox.showerror("Error", "Song not found in database")
+            return
+        
+        directory_path = (Path(self.music_root) / row[0]).parent
+        
+        if not directory_path.exists():
+            messagebox.showerror("Error", f"Directory not found: {directory_path}")
+            return
+        
+        # Copy to clipboard
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(directory_path))
+            self.root.update()  # Keep the clipboard content after window closes
+            
+            # Show a brief confirmation in the status area
+            original_text = self.now_playing_label.cget("text")
+            self.now_playing_label.config(text="✓ Directory path copied to clipboard")
+            self.root.after(2000, lambda: self.now_playing_label.config(text=original_text))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy directory path: {str(e)}")
+    
+    def show_duplicate_comparison_dialog(self):
+        """Show side-by-side folder context for 1-5 selected duplicate files."""
+        selected_items = self.library_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("No Selection", "Please select 1 to 5 files to compare.")
+            return
+        if len(selected_items) > 5:
+            messagebox.showinfo("Too Many Files", "Please select at most 5 files to compare.")
+            return
+
+        targets = []
+        for item_id in selected_items:
+            item = self.library_tree.item(item_id)
+            song_id = item['text']
+            self.cursor.execute(
+                "SELECT relative_path, filename FROM songs WHERE id = ?", (song_id,))
+            row = self.cursor.fetchone()
+            if not row:
+                continue
+            relative_path, filename = row
+            targets.append({
+                'song_id': song_id,
+                'filename': filename,
+                'path': Path(self.music_root) / relative_path,
+            })
+
+        if not targets:
+            messagebox.showerror("Error", "Selected songs could not be found in the database.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Compare Duplicate Files ({len(targets)})")
+        column_width = 300
+        width = min(dialog.winfo_screenwidth() - 80,
+                    max(420, column_width * len(targets) + 40))
+        dialog.geometry(f"{width}x560")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+        dialog.resizable(True, True)
+        dialog.minsize(420, 360)
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        instruction = ttk.Label(
+            dialog,
+            text="Compare the folders containing each selected duplicate. "
+                 "Use the Delete button under a file to remove it.",
+            wraplength=width - 40)
+        instruction.pack(pady=(10, 5))
+
+        def resize_instruction(event):
+            if event.widget is dialog:
+                instruction.configure(wraplength=max(200, event.width - 40))
+
+        dialog.bind('<Configure>', resize_instruction)
+
+        columns_frame = ttk.Frame(dialog)
+        columns_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        def delete_target(target, column):
+            if not messagebox.askyesno(
+                    "Confirm Delete",
+                    f"Are you sure you want to delete this file?\n\n"
+                    f"{target['filename']}\n{target['path']}\n\n"
+                    "This action cannot be undone!", parent=dialog):
+                return
+
+            try:
+                if target['path'].exists():
+                    target['path'].unlink()
+
+                self.cursor.execute("DELETE FROM songs WHERE id = ?", (target['song_id'],))
+                self.conn.commit()
+                self.duration_cache.pop(str(target['song_id']), None)
+                self.update_library_list()
+
+                column.destroy()
+                if not columns_frame.winfo_children():
+                    dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete file: {str(e)}", parent=dialog)
+
+        for target in targets:
+            column = ttk.Frame(columns_frame)
+            column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+
+            parent = target['path'].parent
+            try:
+                parent_label = str(parent.relative_to(Path(self.music_root)))
+            except ValueError:
+                parent_label = str(parent)
+            if parent_label in ('', '.'):
+                parent_label = '(music root)'
+
+            try:
+                entries = sorted(parent.iterdir(),
+                                 key=lambda p: (not p.is_dir(), p.name.lower()))
+            except OSError:
+                entries = []
+
+            sibling_count = sum(1 for entry in entries if entry != target['path'])
+            sibling_label = f"{sibling_count} sibling{'s' if sibling_count != 1 else ''}"
+
+            header = ttk.Frame(column)
+            header.pack(fill=tk.X)
+            ttk.Label(header, text=target['filename'],
+                      font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
+            ttk.Label(header, text=parent_label,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+            ttk.Label(header, text=sibling_label,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+
+            try:
+                stat = target['path'].stat()
+                details = (f"{stat.st_size / (1024 * 1024):.2f} MB  -  "
+                           f"{datetime.fromtimestamp(stat.st_mtime):%Y-%m-%d %H:%M}")
+            except OSError:
+                details = "File not found on disk"
+            ttk.Label(header, text=details,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+
+            list_frame = ttk.Frame(column)
+            list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            listbox = tk.Listbox(list_frame,
+                                 yscrollcommand=scrollbar.set,
+                                 bg=self.colors['entry_bg'],
+                                 fg=self.colors['fg'],
+                                 selectbackground=self.colors['accent'],
+                                 selectforeground=self.colors['select_fg'],
+                                 borderwidth=1,
+                                 relief='solid',
+                                 exportselection=False)
+            listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=listbox.yview)
+
+            highlight_index = None
+            for entry in entries:
+                is_dir = entry.is_dir()
+                listbox.insert(tk.END, entry.name + ('/' if is_dir else ''))
+                if not is_dir and entry.name == target['filename']:
+                    highlight_index = listbox.size() - 1
+
+            if highlight_index is not None:
+                listbox.itemconfig(highlight_index,
+                                   background=self.colors['accent'],
+                                   foreground=self.colors['select_fg'])
+                listbox.see(highlight_index)
+            elif not entries:
+                listbox.insert(tk.END, '(folder is empty or unavailable)')
+                listbox.itemconfig(0, foreground=self.colors['accent'])
+
+            ttk.Button(column, text="Delete This File",
+                       command=lambda t=target, c=column: delete_target(t, c)).pack(
+                           fill=tk.X, pady=(0, 4))
+
+        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 10))
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
     def delete_file(self):
         """Delete the selected file"""
         selection = self.library_tree.selection()
