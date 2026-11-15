@@ -321,7 +321,7 @@ class MusicPlaylistManager:
         Each entry is (label, keywords, callback). Add new commands here;
         keywords are extra terms that help the filter find the command.
         """
-        return [
+        commands = [
             ("Edit ID3 Metadata", "id3 tags mp3 metadata", self.edit_id3_metadata),
             ("Edit Tags", "tags edit selected", lambda: self.edit_tags(None)),
             ("Bulk Edit Tags", "tags bulk edit multiple", self.bulk_edit_tags_dialog),
@@ -348,9 +348,30 @@ class MusicPlaylistManager:
             ("Focus Album Filter", "focus album filter", lambda: self.album_filter_entry.focus_set()),
             ("Focus Path Filter", "focus path filter", lambda: self.path_filter_entry.focus_set()),
             ("Focus Music Files", "focus music files list library", self.focus_library),
-            ("Keyboard Shortcuts", "help shortcuts keys", self.show_help),
-            ("Quit", "quit exit close application", self.quit_app),
         ]
+
+        sort_columns = [
+            ('ID', '#0'),
+            ('Filename', 'Filename'),
+            ('Path', 'Path'),
+            ('Artist', 'Artist'),
+            ('Album', 'Album'),
+            ('Tags', 'Tags'),
+        ]
+        for label, column in sort_columns:
+            commands.append(
+                (f"Sort {label} Ascending",
+                 f"sort column {label} asc ascending a-z",
+                 lambda c=column: self.sort_column(c, False)))
+            commands.append(
+                (f"Sort {label} Descending",
+                 f"sort column {label} desc descending z-a",
+                 lambda c=column: self.sort_column(c, True)))
+
+        commands.append(("Keyboard Shortcuts", "help shortcuts keys", self.show_help))
+        commands.append(("Quit", "quit exit close application", self.quit_app))
+
+        return commands
 
     def show_command_palette(self):
         """Show a filterable command palette (Ctrl+/)"""
