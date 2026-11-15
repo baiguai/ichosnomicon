@@ -54,6 +54,8 @@ class MusicPlaylistManager:
         self.root.bind('<Control-Shift-D>', lambda e: self.show_duplicate_comparison_dialog())
         self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
         self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
+        self.root.bind('<Control-slash>', lambda e: self.show_command_palette())
+        self.root.bind('<Control-Key-slash>', lambda e: self.show_command_palette())
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -215,6 +217,18 @@ class MusicPlaylistManager:
     def focus_search(self):
         """Focus on the search field"""
         self.search_entry.focus_set()
+
+    def focus_library(self):
+        """Focus the music files list, selecting the first item if needed"""
+        if not self.library_tree.selection():
+            children = self.library_tree.get_children()
+            if children:
+                first = children[0]
+                self.library_tree.selection_set(first)
+                self.library_tree.focus(first)
+                self.library_tree.see(first)
+                self.update_selection_count()
+        self.library_tree.focus_set()
     
     def delete_selected_files(self):
         """Delete all selected files"""
@@ -289,11 +303,172 @@ class MusicPlaylistManager:
         self.library_tree.selection_remove(self.library_tree.selection())
         self.update_selection_count()
 
+    def toggle_show_duplicates(self):
+        """Toggle the Show Duplicates filter"""
+        self.show_duplicates_var.set(not self.show_duplicates_var.get())
+
+    def clear_filters(self):
+        """Clear all library filters"""
+        self.search_var.set('')
+        self.tag_filter_var.set('')
+        self.artist_filter_var.set('')
+        self.album_filter_var.set('')
+        self.path_filter_var.set('')
+
+    def get_commands(self):
+        """Return the list of commands shown in the command palette.
+
+        Each entry is (label, keywords, callback). Add new commands here;
+        keywords are extra terms that help the filter find the command.
+        """
+        return [
+            ("Edit ID3 Metadata", "id3 tags mp3 metadata", self.edit_id3_metadata),
+            ("Edit Tags", "tags edit selected", lambda: self.edit_tags(None)),
+            ("Bulk Edit Tags", "tags bulk edit multiple", self.bulk_edit_tags_dialog),
+            ("Rename File", "rename filename selected", self.rename_selected_file),
+            ("Delete File(s)", "delete remove selected", self.delete_selected_files),
+            ("Copy File Path", "copy path clipboard file", self.copy_file_path),
+            ("Copy Directory Path", "copy path clipboard directory folder", self.copy_directory_path),
+            ("Create Playlist", "playlist create new", self.create_playlist_dialog),
+            ("Manage Playlists", "playlist manage open load delete export", self.manage_playlists_dialog),
+            ("Select Music Root", "root directory folder select", self.select_root),
+            ("Scan Directory", "scan refresh directory library", self.scan_directory),
+            ("Add Files", "add import files", self.add_files),
+            ("Refresh Library", "refresh reload list", self.update_library_list),
+            ("Select All", "select all files", self.select_all),
+            ("Clear Selection", "deselect clear selection", self.clear_selection),
+            ("Play / Stop Selected", "play stop pause audio", self.toggle_playback),
+            ("Show Loop / BPM Info", "loop bpm tempo info", self.show_loop_info),
+            ("Compare Duplicates", "duplicates compare diff", self.show_duplicate_comparison_dialog),
+            ("Toggle Show Duplicates", "duplicates filter toggle show", self.toggle_show_duplicates),
+            ("Clear All Filters", "filters clear reset search tags artist album path", self.clear_filters),
+            ("Focus Search", "focus search filter", self.focus_search),
+            ("Focus Tags Filter", "focus tags filter", lambda: self.tag_filter_entry.focus_set()),
+            ("Focus Artist Filter", "focus artist filter", lambda: self.artist_filter_entry.focus_set()),
+            ("Focus Album Filter", "focus album filter", lambda: self.album_filter_entry.focus_set()),
+            ("Focus Path Filter", "focus path filter", lambda: self.path_filter_entry.focus_set()),
+            ("Focus Music Files", "focus music files list library", self.focus_library),
+            ("Keyboard Shortcuts", "help shortcuts keys", self.show_help),
+            ("Quit", "quit exit close application", self.quit_app),
+        ]
+
+    def show_command_palette(self):
+        """Show a filterable command palette (Ctrl+/)"""
+        if getattr(self, '_command_palette', None) is not None:
+            try:
+                if self._command_palette.winfo_exists():
+                    self._command_palette.lift()
+                    self._command_palette_entry.focus_set()
+                    return
+            except tk.TclError:
+                pass
+
+        dialog = tk.Toplevel(self.root)
+        self._command_palette = dialog
+        dialog.title("Command Palette")
+        dialog.geometry("560x420")
+        dialog.transient(self.root)
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 3) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        filter_var = tk.StringVar()
+        entry = ttk.Entry(dialog, textvariable=filter_var)
+        entry.pack(fill=tk.X, padx=12, pady=(12, 6))
+        self._command_palette_entry = entry
+
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        listbox = tk.Listbox(list_frame, exportselection=False, activestyle='none',
+                             takefocus=0,
+                             bg=self.colors['entry_bg'],
+                             fg=self.colors['fg'],
+                             selectbackground=self.colors['accent'],
+                             selectforeground=self.colors['select_fg'],
+                             highlightthickness=1,
+                             highlightbackground=self.colors['border'],
+                             highlightcolor=self.colors['accent'],
+                             yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        ttk.Label(dialog, text="↑/↓ navigate   Enter run   Esc clear filter / close",
+                  foreground=self.colors['accent']).pack(pady=8)
+
+        commands = self.get_commands()
+        matches = []
+
+        def refresh(*args):
+            query = filter_var.get().strip().lower()
+            terms = query.split()
+            matches.clear()
+            matches.extend(
+                command for command in commands
+                if all(term in f"{command[0]} {command[1]}".lower() for term in terms)
+            )
+            listbox.delete(0, tk.END)
+            for label, _keywords, _callback in matches:
+                listbox.insert(tk.END, label)
+            if matches:
+                listbox.selection_set(0)
+                listbox.activate(0)
+
+        def move_selection(delta):
+            if not matches:
+                return
+            current = listbox.curselection()
+            index = current[0] if current else 0
+            index = max(0, min(len(matches) - 1, index + delta))
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(index)
+            listbox.activate(index)
+            listbox.see(index)
+
+        def execute(event=None):
+            selection = listbox.curselection()
+            if not selection:
+                return "break"
+            callback = matches[selection[0]][2]
+            dialog.destroy()
+            self.root.after(0, callback)
+            return "break"
+
+        def on_escape(event=None):
+            if filter_var.get().strip():
+                filter_var.set('')
+                return "break"
+            dialog.destroy()
+            return "break"
+
+        filter_var.trace('w', refresh)
+        entry.bind('<Down>', lambda e: (move_selection(1), "break")[1])
+        entry.bind('<Up>', lambda e: (move_selection(-1), "break")[1])
+        entry.bind('<Return>', execute)
+        entry.bind('<KP_Enter>', execute)
+        entry.bind('<Escape>', on_escape)
+        listbox.bind('<Down>', lambda e: (move_selection(1), "break")[1])
+        listbox.bind('<Up>', lambda e: (move_selection(-1), "break")[1])
+        listbox.bind('<Return>', execute)
+        listbox.bind('<Double-Button-1>', execute)
+        dialog.bind('<Escape>', on_escape)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        refresh()
+        entry.focus_set()
+
     def show_help(self):
         """Show keyboard shortcuts help dialog"""
         shortcuts = [
             ("Ctrl+Q", "Quit application"),
             ("Ctrl+O", "Select music root directory"),
+            ("Ctrl+/", "Open command palette"),
             ("Ctrl+F", "Focus search field"),
             ("Ctrl+N", "Scan directory"),
             ("Ctrl+P", "Create playlist"),
@@ -643,26 +818,26 @@ class MusicPlaylistManager:
         ttk.Label(search_frame, text="Tags:").pack(side=tk.LEFT, padx=(20, 5))
         self.tag_filter_var = tk.StringVar()
         self.tag_filter_var.trace('w', lambda *args: self.update_library_list())
-        tag_filter_entry = ttk.Entry(search_frame, textvariable=self.tag_filter_var, width=20)
-        tag_filter_entry.pack(side=tk.LEFT)
+        self.tag_filter_entry = ttk.Entry(search_frame, textvariable=self.tag_filter_var, width=20)
+        self.tag_filter_entry.pack(side=tk.LEFT)
         
         ttk.Label(search_frame, text="Artist:").pack(side=tk.LEFT, padx=(20, 5))
         self.artist_filter_var = tk.StringVar()
         self.artist_filter_var.trace('w', lambda *args: self.update_library_list())
-        artist_filter_entry = ttk.Entry(search_frame, textvariable=self.artist_filter_var, width=20)
-        artist_filter_entry.pack(side=tk.LEFT)
+        self.artist_filter_entry = ttk.Entry(search_frame, textvariable=self.artist_filter_var, width=20)
+        self.artist_filter_entry.pack(side=tk.LEFT)
         
         ttk.Label(search_frame, text="Album:").pack(side=tk.LEFT, padx=(20, 5))
         self.album_filter_var = tk.StringVar()
         self.album_filter_var.trace('w', lambda *args: self.update_library_list())
-        album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
-        album_filter_entry.pack(side=tk.LEFT)
+        self.album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
+        self.album_filter_entry.pack(side=tk.LEFT)
 
         ttk.Label(search_frame, text="Path:").pack(side=tk.LEFT, padx=(20, 5))
         self.path_filter_var = tk.StringVar()
         self.path_filter_var.trace('w', lambda *args: self.update_library_list())
-        path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
-        path_filter_entry.pack(side=tk.LEFT)
+        self.path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
+        self.path_filter_entry.pack(side=tk.LEFT)
 
         self.show_duplicates_var = tk.BooleanVar()
         self.show_duplicates_var.trace('w', lambda *args: self.update_library_list())
