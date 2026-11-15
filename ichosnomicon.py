@@ -2633,31 +2633,30 @@ class MusicPlaylistManager:
         """Check whether a song's path matches the path filter.
 
         Plain text is matched as a case-insensitive substring. Wildcards
-        (*, ? and [seq]) use glob matching, and a directory pattern also
-        matches songs in its subdirectories.
+        (*, ? and [seq]) use glob matching. Patterns can match any part of
+        the path, so a directory pattern also matches songs in it.
         """
-        pattern = path_filter.replace('\\', '/').strip('/').lower()
+        pattern = path_filter.replace('\\', '/').strip().strip('/').lower()
         if not pattern:
             return True
 
-        relative_path = relative_path.replace('\\', '/')
-        parent_path = str(Path(relative_path).parent).replace('\\', '/')
-        if parent_path == '.':
-            parent_path = ''
+        relative_path = relative_path.replace('\\', '/').strip('/')
+        segments = [part for part in relative_path.split('/') if part]
 
-        candidates = {relative_path.lower(), parent_path.lower()}
-        if not parent_path:
+        # Try every contiguous slice of the path so a pattern can start at
+        # any directory, not just the music root.
+        candidates = set()
+        for start in range(len(segments)):
+            for end in range(start + 1, len(segments) + 1):
+                candidates.add('/'.join(segments[start:end]).lower())
+        if len(segments) <= 1:
             candidates.add('(root)')
 
         if not any(ch in pattern for ch in '*?['):
             return any(pattern in candidate for candidate in candidates)
 
-        for candidate in candidates:
-            if fnmatch.fnmatchcase(candidate, pattern):
-                return True
-            if fnmatch.fnmatchcase(candidate, pattern.rstrip('/') + '/*'):
-                return True
-        return False
+        return any(fnmatch.fnmatchcase(candidate, pattern)
+                   for candidate in candidates)
 
     def update_library_list(self):
         """Update the library list based on search filters"""
