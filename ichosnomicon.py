@@ -30,14 +30,224 @@ try:
 except ImportError:
     PYGAME_AVAILABLE = False
 
+THEMES = {
+    'Midnight': {
+        'bg': '#121212',
+        'fg': '#bfd0f8',
+        'select_bg': '#121212',
+        'select_fg': '#ffffff',
+        'button_bg': '#2a2a2a',
+        'entry_bg': '#121212',
+        'entry_fg': '#bfd0f8',
+        'accent': '#808080',
+        'accent_hover': '#a0a0a0',
+        'border': '#2a2a2a',
+        'highlight': '#808080',
+    },
+    'Dracula': {
+        'bg': '#282a36',
+        'fg': '#f8f8f2',
+        'select_bg': '#282a36',
+        'select_fg': '#282a36',
+        'button_bg': '#44475a',
+        'entry_bg': '#21222c',
+        'entry_fg': '#f8f8f2',
+        'accent': '#bd93f9',
+        'accent_hover': '#ff79c6',
+        'border': '#44475a',
+        'highlight': '#bd93f9',
+    },
+    'Nord': {
+        'bg': '#2e3440',
+        'fg': '#eceff4',
+        'select_bg': '#2e3440',
+        'select_fg': '#2e3440',
+        'button_bg': '#3b4252',
+        'entry_bg': '#2e3440',
+        'entry_fg': '#eceff4',
+        'accent': '#88c0d0',
+        'accent_hover': '#8fbcbb',
+        'border': '#4c566a',
+        'highlight': '#88c0d0',
+    },
+    'Gruvbox Dark': {
+        'bg': '#282828',
+        'fg': '#ebdbb2',
+        'select_bg': '#282828',
+        'select_fg': '#282828',
+        'button_bg': '#3c3836',
+        'entry_bg': '#1d2021',
+        'entry_fg': '#ebdbb2',
+        'accent': '#d79921',
+        'accent_hover': '#fabd2f',
+        'border': '#504945',
+        'highlight': '#d79921',
+    },
+    'Solarized Dark': {
+        'bg': '#002b36',
+        'fg': '#93a1a1',
+        'select_bg': '#002b36',
+        'select_fg': '#fdf6e3',
+        'button_bg': '#073642',
+        'entry_bg': '#002b36',
+        'entry_fg': '#93a1a1',
+        'accent': '#268bd2',
+        'accent_hover': '#2aa198',
+        'border': '#073642',
+        'highlight': '#268bd2',
+    },
+    'Monokai': {
+        'bg': '#272822',
+        'fg': '#f8f8f2',
+        'select_bg': '#272822',
+        'select_fg': '#272822',
+        'button_bg': '#3e3d32',
+        'entry_bg': '#1e1f1c',
+        'entry_fg': '#f8f8f2',
+        'accent': '#a6e22e',
+        'accent_hover': '#66d9ef',
+        'border': '#49483e',
+        'highlight': '#a6e22e',
+    },
+    'Tokyo Night': {
+        'bg': '#1a1b26',
+        'fg': '#c0caf5',
+        'select_bg': '#1a1b26',
+        'select_fg': '#1a1b26',
+        'button_bg': '#24283b',
+        'entry_bg': '#16161e',
+        'entry_fg': '#c0caf5',
+        'accent': '#7aa2f7',
+        'accent_hover': '#bb9af7',
+        'border': '#414868',
+        'highlight': '#7aa2f7',
+    },
+    'One Dark': {
+        'bg': '#282c34',
+        'fg': '#abb2bf',
+        'select_bg': '#282c34',
+        'select_fg': '#282c34',
+        'button_bg': '#3e4451',
+        'entry_bg': '#21252b',
+        'entry_fg': '#abb2bf',
+        'accent': '#61afef',
+        'accent_hover': '#c678dd',
+        'border': '#3e4451',
+        'highlight': '#61afef',
+    },
+    'Rose Pine': {
+        'bg': '#191724',
+        'fg': '#e0def4',
+        'select_bg': '#191724',
+        'select_fg': '#191724',
+        'button_bg': '#26233a',
+        'entry_bg': '#1f1d2e',
+        'entry_fg': '#e0def4',
+        'accent': '#c4a7e7',
+        'accent_hover': '#ebbcba',
+        'border': '#403d52',
+        'highlight': '#c4a7e7',
+    },
+    'Console White': {
+        'bg': '#000000',
+        'fg': '#e6e6e6',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1a1a1a',
+        'entry_bg': '#000000',
+        'entry_fg': '#e6e6e6',
+        'accent': '#e6e6e6',
+        'accent_hover': '#ffffff',
+        'border': '#333333',
+        'highlight': '#e6e6e6',
+    },
+    'Console Yellow': {
+        'bg': '#000000',
+        'fg': '#ffd700',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1f1a00',
+        'entry_bg': '#000000',
+        'entry_fg': '#ffd700',
+        'accent': '#ffd700',
+        'accent_hover': '#fff27a',
+        'border': '#4a3f00',
+        'highlight': '#ffd700',
+    },
+    'Console Green': {
+        'bg': '#000000',
+        'fg': '#33ff33',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#0d1f0d',
+        'entry_bg': '#000000',
+        'entry_fg': '#33ff33',
+        'accent': '#33ff33',
+        'accent_hover': '#7dff7d',
+        'border': '#1f4a1f',
+        'highlight': '#33ff33',
+    },
+    'Console Red': {
+        'bg': '#000000',
+        'fg': '#ff5555',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1f0d0d',
+        'entry_bg': '#000000',
+        'entry_fg': '#ff5555',
+        'accent': '#ff5555',
+        'accent_hover': '#ff8a8a',
+        'border': '#4a1f1f',
+        'highlight': '#ff5555',
+    },
+    'Solarized Light': {
+        'bg': '#fdf6e3',
+        'fg': '#586e75',
+        'select_bg': '#eee8d5',
+        'select_fg': '#ffffff',
+        'button_bg': '#eee8d5',
+        'entry_bg': '#fffaf0',
+        'entry_fg': '#586e75',
+        'accent': '#268bd2',
+        'accent_hover': '#2aa198',
+        'border': '#d5cdb6',
+        'highlight': '#268bd2',
+    },
+    'Gruvbox Light': {
+        'bg': '#fbf1c7',
+        'fg': '#3c3836',
+        'select_bg': '#ebdbb2',
+        'select_fg': '#fbf1c7',
+        'button_bg': '#ebdbb2',
+        'entry_bg': '#fff7d6',
+        'entry_fg': '#3c3836',
+        'accent': '#af3a03',
+        'accent_hover': '#d65d0e',
+        'border': '#d5c4a1',
+        'highlight': '#af3a03',
+    },
+    'GitHub Light': {
+        'bg': '#ffffff',
+        'fg': '#24292f',
+        'select_bg': '#f6f8fa',
+        'select_fg': '#ffffff',
+        'button_bg': '#f6f8fa',
+        'entry_bg': '#ffffff',
+        'entry_fg': '#24292f',
+        'accent': '#0969da',
+        'accent_hover': '#218bff',
+        'border': '#d0d7de',
+        'highlight': '#0969da',
+    },
+}
+
+DEFAULT_THEME = 'Midnight'
+
 class MusicPlaylistManager:
     def __init__(self, root):
         self.root = root
         self.root.title("Music Playlist Manager")
         self.root.geometry("1600x700")
-        
-        # Apply dark theme
-        self.setup_dark_theme()
         
         # Bind keyboard shortcuts
         self.root.bind('<Control-q>', lambda e: self.quit_app())
@@ -94,37 +304,29 @@ class MusicPlaylistManager:
         # Create playlists directory if it doesn't exist
         self.playlists_path.mkdir(exist_ok=True)
         
+        self.theme_name = DEFAULT_THEME
         self.load_config()
+        self.apply_theme(self.theme_name)
         if self.music_root:
             self.load_database()
         self.create_widgets()
         if self.music_root:
             self.update_library_list()
     
-    def setup_dark_theme(self):
-        """Configure dark theme colors and styles"""
-        # Dark theme colors
-        self.colors = {
-            'bg': '#121212',
-            'fg': '#bfd0f8',
-            'select_bg': '#121212',
-            'select_fg': '#ffffff',
-            'button_bg': '#2a2a2a',
-            'entry_bg': '#121212',
-            'entry_fg': '#bfd0f8',
-            'accent': '#808080',
-            'accent_hover': '#a0a0a0',
-            'border': '#2a2a2a',
-            'highlight': '#808080',
-        }
-        
+    def apply_theme(self, theme_name, save=False):
+        """Apply a named color theme to the application"""
+        if theme_name not in THEMES:
+            theme_name = DEFAULT_THEME
+        self.theme_name = theme_name
+        self.colors = dict(THEMES[theme_name])
+
         # Configure root window
         self.root.configure(bg=self.colors['bg'])
-        
+
         # Configure ttk styles
         style = ttk.Style()
         style.theme_use('clam')
-        
+
         # Configure general styles
         style.configure('.',
                        background=self.colors['bg'],
@@ -136,15 +338,15 @@ class MusicPlaylistManager:
                        troughcolor=self.colors['select_bg'],
                        selectbackground=self.colors['accent'],
                        selectforeground=self.colors['select_fg'])
-        
+
         # Frame
         style.configure('TFrame', background=self.colors['bg'])
-        
+
         # Label
         style.configure('TLabel',
                        background=self.colors['bg'],
                        foreground=self.colors['fg'])
-        
+
         # Button
         style.configure('TButton',
                        background=self.colors['button_bg'],
@@ -156,22 +358,22 @@ class MusicPlaylistManager:
                  background=[('active', self.colors['accent']),
                            ('pressed', self.colors['accent_hover'])],
                  foreground=[('active', self.colors['select_fg'])])
-        
+
         # Accent Button
         style.configure('Accent.TButton',
                        background=self.colors['accent'],
                        foreground=self.colors['select_fg'])
         style.map('Accent.TButton',
                  background=[('active', self.colors['accent_hover']),
-                           ('pressed', '#004578')])
-        
+                           ('pressed', self.colors['accent_hover'])])
+
         # Entry
         style.configure('TEntry',
                        fieldbackground=self.colors['entry_bg'],
                        foreground=self.colors['fg'],
                        bordercolor=self.colors['border'],
                        insertcolor=self.colors['fg'])
-        
+
         # Treeview
         style.configure('Treeview',
                        background=self.colors['select_bg'],
@@ -196,14 +398,83 @@ class MusicPlaylistManager:
                  background=[('active', self.colors['bg'])],
                  indicatorcolor=[('selected', self.colors['accent'])],
                  relief=[('selected', 'flat')])
-        
+
+        # Scale
+        style.configure('TScale',
+                       background=self.colors['bg'],
+                       troughcolor=self.colors['select_bg'],
+                       bordercolor=self.colors['border'])
+
         # Scrollbar
-        style.configure('Vertical.TScrollbar',
-                       background=self.colors['button_bg'],
-                       troughcolor=self.colors['bg'],
-                       bordercolor=self.colors['border'],
-                       arrowcolor=self.colors['fg'])
-    
+        for orient in ('Vertical', 'Horizontal'):
+            style.configure(f'{orient}.TScrollbar',
+                           background=self.colors['button_bg'],
+                           troughcolor=self.colors['bg'],
+                           bordercolor=self.colors['border'],
+                           arrowcolor=self.colors['fg'])
+
+        self._refresh_themed_widgets()
+
+        if save:
+            self.save_config()
+
+    def _refresh_themed_widgets(self):
+        """Recolor widgets that have explicit colors instead of ttk styles"""
+        c = self.colors
+
+        for widget in (getattr(self, 'root_label', None),
+                       getattr(self, 'runtime_label', None),
+                       getattr(self, 'now_playing_label', None)):
+            if widget is not None:
+                try:
+                    widget.configure(foreground=c['accent'])
+                except tk.TclError:
+                    pass
+
+        menu_options = {
+            'bg': c['button_bg'],
+            'fg': c['fg'],
+            'activebackground': c['accent'],
+            'activeforeground': c['select_fg'],
+        }
+        for menu in (getattr(self, 'recent_roots_menu', None),
+                     getattr(self, 'context_menu', None)):
+            if menu is not None:
+                try:
+                    menu.configure(**menu_options)
+                except tk.TclError:
+                    pass
+
+        listbox_options = {
+            'bg': c['entry_bg'],
+            'fg': c['fg'],
+            'selectbackground': c['accent'],
+            'selectforeground': c['select_fg'],
+            'highlightbackground': c['border'],
+            'highlightcolor': c['accent'],
+        }
+        for listbox in (getattr(self, 'autocomplete_listbox', None),
+                        getattr(self, '_theme_picker_listbox', None)):
+            if listbox is not None:
+                try:
+                    listbox.configure(**listbox_options)
+                except tk.TclError:
+                    pass
+
+        picker = getattr(self, '_theme_picker_dialog', None)
+        if picker is not None:
+            try:
+                picker.configure(bg=c['bg'])
+            except tk.TclError:
+                pass
+
+        hint = getattr(self, '_theme_picker_hint', None)
+        if hint is not None:
+            try:
+                hint.configure(foreground=c['accent'])
+            except tk.TclError:
+                pass
+
     def quit_app(self):
         """Cleanly close the application"""
         if PYGAME_AVAILABLE:
@@ -392,6 +663,9 @@ class MusicPlaylistManager:
                  f"sort column {label} desc descending z-a",
                  lambda c=column: self.sort_column(c, True)))
 
+        commands.append(("Change Color Theme",
+                         "theme color appearance dark light picker",
+                         self.show_theme_picker))
         commands.append(("Keyboard Shortcuts", "help shortcuts keys", self.show_help))
         commands.append(("Quit", "quit exit close application", self.quit_app))
 
@@ -507,6 +781,106 @@ class MusicPlaylistManager:
 
         refresh()
         entry.focus_set()
+
+    def show_theme_picker(self):
+        """Show the color theme picker with live preview"""
+        existing = getattr(self, '_theme_picker_dialog', None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_force()
+                    return
+            except tk.TclError:
+                pass
+
+        previous_theme = self.theme_name
+        theme_names = list(THEMES.keys())
+
+        dialog = tk.Toplevel(self.root)
+        self._theme_picker_dialog = dialog
+        dialog.title("Color Theme")
+        dialog.geometry("360x480")
+        dialog.transient(self.root)
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Choose a color theme",
+                  font=('TkDefaultFont', 11, 'bold')).pack(pady=(14, 8))
+
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 8))
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        listbox = tk.Listbox(list_frame, exportselection=False, activestyle='none',
+                             bg=self.colors['entry_bg'],
+                             fg=self.colors['fg'],
+                             selectbackground=self.colors['accent'],
+                             selectforeground=self.colors['select_fg'],
+                             highlightthickness=1,
+                             highlightbackground=self.colors['border'],
+                             highlightcolor=self.colors['accent'],
+                             yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+        self._theme_picker_listbox = listbox
+
+        for name in theme_names:
+            listbox.insert(tk.END, name)
+
+        hint = ttk.Label(dialog, text="↑/↓ preview   Enter apply   Esc cancel",
+                         foreground=self.colors['accent'])
+        hint.pack(pady=8)
+        self._theme_picker_hint = hint
+
+        def preview(event=None):
+            selection = listbox.curselection()
+            if selection:
+                self.apply_theme(theme_names[selection[0]])
+
+        def close(revert):
+            self._theme_picker_dialog = None
+            self._theme_picker_listbox = None
+            self._theme_picker_hint = None
+            if revert:
+                self.apply_theme(previous_theme)
+            dialog.destroy()
+
+        def apply_and_close(event=None):
+            selection = listbox.curselection()
+            if selection:
+                self.apply_theme(theme_names[selection[0]], save=True)
+            close(revert=False)
+            return "break"
+
+        def cancel(event=None):
+            close(revert=True)
+            return "break"
+
+        index = theme_names.index(previous_theme) if previous_theme in theme_names else 0
+        listbox.selection_set(index)
+        listbox.activate(index)
+        listbox.see(index)
+
+        listbox.bind('<<ListboxSelect>>', preview)
+        listbox.bind('<Return>', apply_and_close)
+        listbox.bind('<KP_Enter>', apply_and_close)
+        listbox.bind('<Double-Button-1>', apply_and_close)
+        listbox.bind('<Escape>', cancel)
+        dialog.bind('<Escape>', cancel)
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+
+        listbox.focus_set()
 
     def show_help(self):
         """Show keyboard shortcuts help dialog"""
@@ -726,6 +1100,7 @@ class MusicPlaylistManager:
         self.last_playlist_dir = ''
         self.last_export_dir = ''
         self.recent_roots = []
+        self.theme_name = DEFAULT_THEME
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
@@ -737,6 +1112,9 @@ class MusicPlaylistManager:
                     recent_roots = config.get('recent_roots', [])
                     if isinstance(recent_roots, list):
                         self.recent_roots = [r for r in recent_roots if isinstance(r, str)]
+                    theme = config.get('theme', DEFAULT_THEME)
+                    if theme in THEMES:
+                        self.theme_name = theme
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load config file: {e}")
                 print("Creating new config file...")
@@ -759,6 +1137,7 @@ class MusicPlaylistManager:
             'last_playlist_dir': self.last_playlist_dir,
             'last_export_dir': self.last_export_dir,
             'recent_roots': self.recent_roots,
+            'theme': self.theme_name,
         }
         with open(self.config_path, 'w') as f:
             json.dump(config, f)
