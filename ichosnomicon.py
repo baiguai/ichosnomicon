@@ -4,6 +4,8 @@ import sqlite3
 import os
 import sys
 import shutil
+import fnmatch
+import threading
 from pathlib import Path
 import json
 from datetime import datetime
@@ -28,19 +30,282 @@ try:
 except ImportError:
     PYGAME_AVAILABLE = False
 
+THEMES = {
+    'Midnight': {
+        'bg': '#121212',
+        'fg': '#bfd0f8',
+        'select_bg': '#121212',
+        'select_fg': '#ffffff',
+        'button_bg': '#2a2a2a',
+        'entry_bg': '#121212',
+        'entry_fg': '#bfd0f8',
+        'accent': '#808080',
+        'accent_hover': '#a0a0a0',
+        'border': '#2a2a2a',
+        'highlight': '#808080',
+    },
+    'Dracula': {
+        'bg': '#282a36',
+        'fg': '#f8f8f2',
+        'select_bg': '#282a36',
+        'select_fg': '#282a36',
+        'button_bg': '#44475a',
+        'entry_bg': '#21222c',
+        'entry_fg': '#f8f8f2',
+        'accent': '#bd93f9',
+        'accent_hover': '#ff79c6',
+        'border': '#44475a',
+        'highlight': '#bd93f9',
+    },
+    'Nord': {
+        'bg': '#2e3440',
+        'fg': '#eceff4',
+        'select_bg': '#2e3440',
+        'select_fg': '#2e3440',
+        'button_bg': '#3b4252',
+        'entry_bg': '#2e3440',
+        'entry_fg': '#eceff4',
+        'accent': '#88c0d0',
+        'accent_hover': '#8fbcbb',
+        'border': '#4c566a',
+        'highlight': '#88c0d0',
+    },
+    'Gruvbox Dark': {
+        'bg': '#282828',
+        'fg': '#ebdbb2',
+        'select_bg': '#282828',
+        'select_fg': '#282828',
+        'button_bg': '#3c3836',
+        'entry_bg': '#1d2021',
+        'entry_fg': '#ebdbb2',
+        'accent': '#d79921',
+        'accent_hover': '#fabd2f',
+        'border': '#504945',
+        'highlight': '#d79921',
+    },
+    'Solarized Dark': {
+        'bg': '#002b36',
+        'fg': '#93a1a1',
+        'select_bg': '#002b36',
+        'select_fg': '#fdf6e3',
+        'button_bg': '#073642',
+        'entry_bg': '#002b36',
+        'entry_fg': '#93a1a1',
+        'accent': '#268bd2',
+        'accent_hover': '#2aa198',
+        'border': '#073642',
+        'highlight': '#268bd2',
+    },
+    'Monokai': {
+        'bg': '#272822',
+        'fg': '#f8f8f2',
+        'select_bg': '#272822',
+        'select_fg': '#272822',
+        'button_bg': '#3e3d32',
+        'entry_bg': '#1e1f1c',
+        'entry_fg': '#f8f8f2',
+        'accent': '#a6e22e',
+        'accent_hover': '#66d9ef',
+        'border': '#49483e',
+        'highlight': '#a6e22e',
+    },
+    'Tokyo Night': {
+        'bg': '#1a1b26',
+        'fg': '#c0caf5',
+        'select_bg': '#1a1b26',
+        'select_fg': '#1a1b26',
+        'button_bg': '#24283b',
+        'entry_bg': '#16161e',
+        'entry_fg': '#c0caf5',
+        'accent': '#7aa2f7',
+        'accent_hover': '#bb9af7',
+        'border': '#414868',
+        'highlight': '#7aa2f7',
+    },
+    'One Dark': {
+        'bg': '#282c34',
+        'fg': '#abb2bf',
+        'select_bg': '#282c34',
+        'select_fg': '#282c34',
+        'button_bg': '#3e4451',
+        'entry_bg': '#21252b',
+        'entry_fg': '#abb2bf',
+        'accent': '#61afef',
+        'accent_hover': '#c678dd',
+        'border': '#3e4451',
+        'highlight': '#61afef',
+    },
+    'Rose Pine': {
+        'bg': '#191724',
+        'fg': '#e0def4',
+        'select_bg': '#191724',
+        'select_fg': '#191724',
+        'button_bg': '#26233a',
+        'entry_bg': '#1f1d2e',
+        'entry_fg': '#e0def4',
+        'accent': '#c4a7e7',
+        'accent_hover': '#ebbcba',
+        'border': '#403d52',
+        'highlight': '#c4a7e7',
+    },
+    'Console Bleak': {
+        'bg': '#000000',
+        'fg': '#e6e6e6',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#000000',
+        'entry_bg': '#000000',
+        'entry_fg': '#e6e6e6',
+        'accent': '#e6e6e6',
+        'accent_hover': '#ffffff',
+        'border': '#333333',
+        'highlight': '#e6e6e6',
+    },
+    'Console White': {
+        'bg': '#000000',
+        'fg': '#e6e6e6',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1a1a1a',
+        'entry_bg': '#000000',
+        'entry_fg': '#e6e6e6',
+        'accent': '#e6e6e6',
+        'accent_hover': '#ffffff',
+        'border': '#333333',
+        'highlight': '#e6e6e6',
+    },
+    'Console Yellow': {
+        'bg': '#000000',
+        'fg': '#ffd700',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1f1a00',
+        'entry_bg': '#000000',
+        'entry_fg': '#ffd700',
+        'accent': '#ffd700',
+        'accent_hover': '#fff27a',
+        'border': '#4a3f00',
+        'highlight': '#ffd700',
+    },
+    'Console Green': {
+        'bg': '#000000',
+        'fg': '#33ff33',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#0d1f0d',
+        'entry_bg': '#000000',
+        'entry_fg': '#33ff33',
+        'accent': '#33ff33',
+        'accent_hover': '#7dff7d',
+        'border': '#1f4a1f',
+        'highlight': '#33ff33',
+    },
+    'Console Red': {
+        'bg': '#000000',
+        'fg': '#ff5555',
+        'select_bg': '#000000',
+        'select_fg': '#000000',
+        'button_bg': '#1f0d0d',
+        'entry_bg': '#000000',
+        'entry_fg': '#ff5555',
+        'accent': '#ff5555',
+        'accent_hover': '#ff8a8a',
+        'border': '#4a1f1f',
+        'highlight': '#ff5555',
+    },
+    'Synthwave': {
+        'bg': '#1a0b2e',
+        'fg': '#f8f8f2',
+        'select_bg': '#1a0b2e',
+        'select_fg': '#1a0b2e',
+        'button_bg': '#2d1b4e',
+        'entry_bg': '#12081f',
+        'entry_fg': '#f8f8f2',
+        'accent': '#ff2a6d',
+        'accent_hover': '#05d9e8',
+        'border': '#3d2a5a',
+        'highlight': '#ff2a6d',
+    },
+    'Synthwave Sunset': {
+        'bg': '#2b1055',
+        'fg': '#ffd9f2',
+        'select_bg': '#2b1055',
+        'select_fg': '#2b1055',
+        'button_bg': '#3f1d6e',
+        'entry_bg': '#1e0a3c',
+        'entry_fg': '#ffd9f2',
+        'accent': '#ff7b00',
+        'accent_hover': '#ff2a6d',
+        'border': '#5a2d8a',
+        'highlight': '#ff7b00',
+    },
+    'Miami Vice': {
+        'bg': '#0d0221',
+        'fg': '#e0e0ff',
+        'select_bg': '#0d0221',
+        'select_fg': '#0d0221',
+        'button_bg': '#1a0b2e',
+        'entry_bg': '#0d0221',
+        'entry_fg': '#e0e0ff',
+        'accent': '#f706cf',
+        'accent_hover': '#00f0ff',
+        'border': '#2a1b4a',
+        'highlight': '#f706cf',
+    },
+    'Solarized Light': {
+        'bg': '#fdf6e3',
+        'fg': '#586e75',
+        'select_bg': '#eee8d5',
+        'select_fg': '#ffffff',
+        'button_bg': '#eee8d5',
+        'entry_bg': '#fffaf0',
+        'entry_fg': '#586e75',
+        'accent': '#268bd2',
+        'accent_hover': '#2aa198',
+        'border': '#d5cdb6',
+        'highlight': '#268bd2',
+    },
+    'Gruvbox Light': {
+        'bg': '#fbf1c7',
+        'fg': '#3c3836',
+        'select_bg': '#ebdbb2',
+        'select_fg': '#fbf1c7',
+        'button_bg': '#ebdbb2',
+        'entry_bg': '#fff7d6',
+        'entry_fg': '#3c3836',
+        'accent': '#af3a03',
+        'accent_hover': '#d65d0e',
+        'border': '#d5c4a1',
+        'highlight': '#af3a03',
+    },
+    'GitHub Light': {
+        'bg': '#ffffff',
+        'fg': '#24292f',
+        'select_bg': '#f6f8fa',
+        'select_fg': '#ffffff',
+        'button_bg': '#f6f8fa',
+        'entry_bg': '#ffffff',
+        'entry_fg': '#24292f',
+        'accent': '#0969da',
+        'accent_hover': '#218bff',
+        'border': '#d0d7de',
+        'highlight': '#0969da',
+    },
+}
+
+DEFAULT_THEME = 'Midnight'
+
 class MusicPlaylistManager:
     def __init__(self, root):
         self.root = root
         self.root.title("Music Playlist Manager")
         self.root.geometry("1600x700")
         
-        # Apply dark theme
-        self.setup_dark_theme()
-        
         # Bind keyboard shortcuts
         self.root.bind('<Control-q>', lambda e: self.quit_app())
         self.root.bind('<Control-o>', lambda e: self.select_root())
         self.root.bind('<Control-f>', lambda e: self.focus_search())
+        self.root.bind('<Control-m>', lambda e: self.focus_library())
         self.root.bind('<Control-n>', lambda e: self.scan_directory())
         self.root.bind('<Control-p>', lambda e: self.create_playlist_dialog())
         self.root.bind('<Delete>', lambda e: self.delete_selected_files())
@@ -49,14 +314,25 @@ class MusicPlaylistManager:
         self.root.bind('<Control-a>', lambda e: self.select_all())
         self.root.bind('<Control-Shift-C>', lambda e: self.copy_file_path())
         self.root.bind('<Control-Shift-T>', lambda e: self.edit_tags(e))
+        self.root.bind('<Control-Shift-D>', lambda e: self.show_duplicate_comparison_dialog())
         self.root.bind('<Control-Shift-P>', lambda e: self.toggle_playback())
         self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
+        self.root.bind('<Control-slash>', lambda e: self.show_command_palette())
+        self.root.bind('<Control-Key-slash>', lambda e: self.show_command_palette())
+        self.root.bind('<greater>', lambda e: self.seek_playback(5))
+        self.root.bind('<less>', lambda e: self.seek_playback(-5))
+        self.root.bind('<underscore>', lambda e: self.adjust_volume(-5))
+        self.root.bind('<plus>', lambda e: self.adjust_volume(5))
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
         self.currently_playing = None
         self.is_playing = False
         self.current_volume = 0.7
+
+        # Selection runtime state
+        self.duration_cache = {}
+        self.duration_request_id = 0
         self.song_length = 0
         self.is_seeking = False  # Flag to prevent update loop during manual seek
         self.song_start_time = 0  # Track when song started for accurate positioning
@@ -84,37 +360,29 @@ class MusicPlaylistManager:
         # Create playlists directory if it doesn't exist
         self.playlists_path.mkdir(exist_ok=True)
         
+        self.theme_name = DEFAULT_THEME
         self.load_config()
+        self.apply_theme(self.theme_name)
         if self.music_root:
             self.load_database()
         self.create_widgets()
         if self.music_root:
             self.update_library_list()
     
-    def setup_dark_theme(self):
-        """Configure dark theme colors and styles"""
-        # Dark theme colors
-        self.colors = {
-            'bg': '#121212',
-            'fg': '#bfd0f8',
-            'select_bg': '#121212',
-            'select_fg': '#ffffff',
-            'button_bg': '#2a2a2a',
-            'entry_bg': '#121212',
-            'entry_fg': '#bfd0f8',
-            'accent': '#808080',
-            'accent_hover': '#a0a0a0',
-            'border': '#2a2a2a',
-            'highlight': '#808080',
-        }
-        
+    def apply_theme(self, theme_name, save=False):
+        """Apply a named color theme to the application"""
+        if theme_name not in THEMES:
+            theme_name = DEFAULT_THEME
+        self.theme_name = theme_name
+        self.colors = dict(THEMES[theme_name])
+
         # Configure root window
         self.root.configure(bg=self.colors['bg'])
-        
+
         # Configure ttk styles
         style = ttk.Style()
         style.theme_use('clam')
-        
+
         # Configure general styles
         style.configure('.',
                        background=self.colors['bg'],
@@ -126,15 +394,15 @@ class MusicPlaylistManager:
                        troughcolor=self.colors['select_bg'],
                        selectbackground=self.colors['accent'],
                        selectforeground=self.colors['select_fg'])
-        
+
         # Frame
         style.configure('TFrame', background=self.colors['bg'])
-        
+
         # Label
         style.configure('TLabel',
                        background=self.colors['bg'],
                        foreground=self.colors['fg'])
-        
+
         # Button
         style.configure('TButton',
                        background=self.colors['button_bg'],
@@ -146,22 +414,22 @@ class MusicPlaylistManager:
                  background=[('active', self.colors['accent']),
                            ('pressed', self.colors['accent_hover'])],
                  foreground=[('active', self.colors['select_fg'])])
-        
+
         # Accent Button
         style.configure('Accent.TButton',
                        background=self.colors['accent'],
                        foreground=self.colors['select_fg'])
         style.map('Accent.TButton',
                  background=[('active', self.colors['accent_hover']),
-                           ('pressed', '#004578')])
-        
+                           ('pressed', self.colors['accent_hover'])])
+
         # Entry
         style.configure('TEntry',
                        fieldbackground=self.colors['entry_bg'],
                        foreground=self.colors['fg'],
                        bordercolor=self.colors['border'],
                        insertcolor=self.colors['fg'])
-        
+
         # Treeview
         style.configure('Treeview',
                        background=self.colors['select_bg'],
@@ -186,14 +454,83 @@ class MusicPlaylistManager:
                  background=[('active', self.colors['bg'])],
                  indicatorcolor=[('selected', self.colors['accent'])],
                  relief=[('selected', 'flat')])
-        
+
+        # Scale
+        style.configure('TScale',
+                       background=self.colors['bg'],
+                       troughcolor=self.colors['select_bg'],
+                       bordercolor=self.colors['border'])
+
         # Scrollbar
-        style.configure('Vertical.TScrollbar',
-                       background=self.colors['button_bg'],
-                       troughcolor=self.colors['bg'],
-                       bordercolor=self.colors['border'],
-                       arrowcolor=self.colors['fg'])
-    
+        for orient in ('Vertical', 'Horizontal'):
+            style.configure(f'{orient}.TScrollbar',
+                           background=self.colors['button_bg'],
+                           troughcolor=self.colors['bg'],
+                           bordercolor=self.colors['border'],
+                           arrowcolor=self.colors['fg'])
+
+        self._refresh_themed_widgets()
+
+        if save:
+            self.save_config()
+
+    def _refresh_themed_widgets(self):
+        """Recolor widgets that have explicit colors instead of ttk styles"""
+        c = self.colors
+
+        for widget in (getattr(self, 'root_label', None),
+                       getattr(self, 'runtime_label', None),
+                       getattr(self, 'now_playing_label', None)):
+            if widget is not None:
+                try:
+                    widget.configure(foreground=c['accent'])
+                except tk.TclError:
+                    pass
+
+        menu_options = {
+            'bg': c['button_bg'],
+            'fg': c['fg'],
+            'activebackground': c['accent'],
+            'activeforeground': c['select_fg'],
+        }
+        for menu in (getattr(self, 'recent_roots_menu', None),
+                     getattr(self, 'context_menu', None)):
+            if menu is not None:
+                try:
+                    menu.configure(**menu_options)
+                except tk.TclError:
+                    pass
+
+        listbox_options = {
+            'bg': c['entry_bg'],
+            'fg': c['fg'],
+            'selectbackground': c['accent'],
+            'selectforeground': c['select_fg'],
+            'highlightbackground': c['border'],
+            'highlightcolor': c['accent'],
+        }
+        for listbox in (getattr(self, 'autocomplete_listbox', None),
+                        getattr(self, '_theme_picker_listbox', None)):
+            if listbox is not None:
+                try:
+                    listbox.configure(**listbox_options)
+                except tk.TclError:
+                    pass
+
+        picker = getattr(self, '_theme_picker_dialog', None)
+        if picker is not None:
+            try:
+                picker.configure(bg=c['bg'])
+            except tk.TclError:
+                pass
+
+        hint = getattr(self, '_theme_picker_hint', None)
+        if hint is not None:
+            try:
+                hint.configure(foreground=c['accent'])
+            except tk.TclError:
+                pass
+
     def quit_app(self):
         """Cleanly close the application"""
         if PYGAME_AVAILABLE:
@@ -208,13 +545,48 @@ class MusicPlaylistManager:
     def focus_search(self):
         """Focus on the search field"""
         self.search_entry.focus_set()
+
+    def focus_library(self):
+        """Focus the music files list, selecting the first item if needed"""
+        if not self.library_tree.selection():
+            children = self.library_tree.get_children()
+            if children:
+                first = children[0]
+                self.library_tree.selection_set(first)
+                self.library_tree.focus(first)
+                self.library_tree.see(first)
+                self.update_selection_count()
+        self.library_tree.focus_set()
+
+    def _select_library_index(self, index):
+        """Select and reveal a library row by index"""
+        items = self.library_tree.get_children()
+        if not items:
+            return "break"
+        index = max(0, min(len(items) - 1, index))
+        item = items[index]
+        self.library_tree.selection_set(item)
+        self.library_tree.focus(item)
+        self.library_tree.see(item)
+        self.update_selection_count()
+        return "break"
+
+    def move_library_selection(self, delta):
+        """Move the library selection up or down"""
+        selection = self.library_tree.selection()
+        index = self.library_tree.index(selection[0]) + delta if selection else 0
+        return self._select_library_index(index)
+
+    def select_library_last(self):
+        """Select the last row in the library"""
+        return self._select_library_index(len(self.library_tree.get_children()) - 1)
     
     def delete_selected_files(self):
         """Delete all selected files"""
         selected_items = self.library_tree.selection()
         if not selected_items:
             return
-        
+
         if len(selected_items) == 1:
             # Use existing single file delete method
             self.delete_file()
@@ -282,22 +654,315 @@ class MusicPlaylistManager:
         self.library_tree.selection_remove(self.library_tree.selection())
         self.update_selection_count()
 
+    def toggle_show_duplicates(self):
+        """Toggle the Show Duplicates filter"""
+        self.show_duplicates_var.set(not self.show_duplicates_var.get())
+
+    def clear_filters(self):
+        """Clear all library filters"""
+        self.search_var.set('')
+        self.tag_filter_var.set('')
+        self.artist_filter_var.set('')
+        self.album_filter_var.set('')
+        self.path_filter_var.set('')
+
+    def get_commands(self):
+        """Return the list of commands shown in the command palette.
+
+        Each entry is (label, keywords, callback). Add new commands here;
+        keywords are extra terms that help the filter find the command.
+        """
+        commands = [
+            ("Edit ID3 Metadata", "id3 tags mp3 metadata", self.edit_id3_metadata),
+            ("Edit Tags", "tags edit selected", lambda: self.edit_tags(None)),
+            ("Bulk Edit Tags", "tags bulk edit multiple", self.bulk_edit_tags_dialog),
+            ("Rename File", "rename filename selected", self.rename_selected_file),
+            ("Delete File(s)", "delete remove selected", self.delete_selected_files),
+            ("Copy File Path", "copy path clipboard file", self.copy_file_path),
+            ("Copy Directory Path", "copy path clipboard directory folder", self.copy_directory_path),
+            ("Create Playlist", "playlist create new", self.create_playlist_dialog),
+            ("Manage Playlists", "playlist manage open load delete export", self.manage_playlists_dialog),
+            ("Select Music Root", "root directory folder select", self.select_root),
+            ("Scan Directory", "scan refresh directory library", self.scan_directory),
+            ("Add Files", "add import files", self.add_files),
+            ("Refresh Library", "refresh reload list", self.update_library_list),
+            ("Select All", "select all files", self.select_all),
+            ("Clear Selection", "deselect clear selection", self.clear_selection),
+            ("Play / Stop Selected", "play stop pause audio", self.toggle_playback),
+            ("Show Loop / BPM Info", "loop bpm tempo info", self.show_loop_info),
+            ("Compare Duplicates", "duplicates compare diff", self.show_duplicate_comparison_dialog),
+            ("Toggle Show Duplicates", "duplicates filter toggle show", self.toggle_show_duplicates),
+            ("Clear All Filters", "filters clear reset search tags artist album path", self.clear_filters),
+            ("Focus Search", "focus search filter", self.focus_search),
+            ("Focus Tags Filter", "focus tags filter", lambda: self.tag_filter_entry.focus_set()),
+            ("Focus Artist Filter", "focus artist filter", lambda: self.artist_filter_entry.focus_set()),
+            ("Focus Album Filter", "focus album filter", lambda: self.album_filter_entry.focus_set()),
+            ("Focus Path Filter", "focus path filter", lambda: self.path_filter_entry.focus_set()),
+            ("Focus Music Files", "focus music files list library", self.focus_library),
+        ]
+
+        sort_columns = [
+            ('ID', '#0'),
+            ('Filename', 'Filename'),
+            ('Path', 'Path'),
+            ('Artist', 'Artist'),
+            ('Album', 'Album'),
+            ('Tags', 'Tags'),
+        ]
+        for label, column in sort_columns:
+            commands.append(
+                (f"Sort {label} Ascending",
+                 f"sort column {label} asc ascending a-z",
+                 lambda c=column: self.sort_column(c, False)))
+            commands.append(
+                (f"Sort {label} Descending",
+                 f"sort column {label} desc descending z-a",
+                 lambda c=column: self.sort_column(c, True)))
+
+        commands.append(("Change Color Theme",
+                         "theme color appearance dark light picker",
+                         self.show_theme_picker))
+        commands.append(("Keyboard Shortcuts", "help shortcuts keys", self.show_help))
+        commands.append(("Quit", "quit exit close application", self.quit_app))
+
+        return commands
+
+    def show_command_palette(self):
+        """Show a filterable command palette (Ctrl+/)"""
+        if getattr(self, '_command_palette', None) is not None:
+            try:
+                if self._command_palette.winfo_exists():
+                    self._command_palette.lift()
+                    self._command_palette_entry.focus_set()
+                    return
+            except tk.TclError:
+                pass
+
+        dialog = tk.Toplevel(self.root)
+        self._command_palette = dialog
+        dialog.title("Command Palette")
+        dialog.geometry("560x420")
+        dialog.transient(self.root)
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 3) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        filter_var = tk.StringVar()
+        entry = ttk.Entry(dialog, textvariable=filter_var)
+        entry.pack(fill=tk.X, padx=12, pady=(12, 6))
+        self._command_palette_entry = entry
+
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=12)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        listbox = tk.Listbox(list_frame, exportselection=False, activestyle='none',
+                             takefocus=0,
+                             bg=self.colors['entry_bg'],
+                             fg=self.colors['fg'],
+                             selectbackground=self.colors['accent'],
+                             selectforeground=self.colors['select_fg'],
+                             highlightthickness=1,
+                             highlightbackground=self.colors['border'],
+                             highlightcolor=self.colors['accent'],
+                             yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+
+        ttk.Label(dialog, text="↑/↓ navigate   Enter run   Esc clear filter / close",
+                  foreground=self.colors['accent']).pack(pady=8)
+
+        commands = self.get_commands()
+        matches = []
+
+        def refresh(*args):
+            query = filter_var.get().strip().lower()
+            terms = query.split()
+            matches.clear()
+            matches.extend(
+                command for command in commands
+                if all(term in f"{command[0]} {command[1]}".lower() for term in terms)
+            )
+            listbox.delete(0, tk.END)
+            for label, _keywords, _callback in matches:
+                listbox.insert(tk.END, label)
+            if matches:
+                listbox.selection_set(0)
+                listbox.activate(0)
+
+        def move_selection(delta):
+            if not matches:
+                return
+            current = listbox.curselection()
+            index = current[0] if current else 0
+            index = max(0, min(len(matches) - 1, index + delta))
+            listbox.selection_clear(0, tk.END)
+            listbox.selection_set(index)
+            listbox.activate(index)
+            listbox.see(index)
+
+        def execute(event=None):
+            selection = listbox.curselection()
+            if not selection:
+                return "break"
+            callback = matches[selection[0]][2]
+            dialog.destroy()
+            self.root.after(0, callback)
+            return "break"
+
+        def on_escape(event=None):
+            if filter_var.get().strip():
+                filter_var.set('')
+                return "break"
+            dialog.destroy()
+            return "break"
+
+        filter_var.trace('w', refresh)
+        entry.bind('<Down>', lambda e: (move_selection(1), "break")[1])
+        entry.bind('<Up>', lambda e: (move_selection(-1), "break")[1])
+        entry.bind('<Return>', execute)
+        entry.bind('<KP_Enter>', execute)
+        entry.bind('<Escape>', on_escape)
+        listbox.bind('<Down>', lambda e: (move_selection(1), "break")[1])
+        listbox.bind('<Up>', lambda e: (move_selection(-1), "break")[1])
+        listbox.bind('<Return>', execute)
+        listbox.bind('<Double-Button-1>', execute)
+        dialog.bind('<Escape>', on_escape)
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+
+        refresh()
+        entry.focus_set()
+
+    def show_theme_picker(self):
+        """Show the color theme picker with live preview"""
+        existing = getattr(self, '_theme_picker_dialog', None)
+        if existing is not None:
+            try:
+                if existing.winfo_exists():
+                    existing.lift()
+                    existing.focus_force()
+                    return
+            except tk.TclError:
+                pass
+
+        previous_theme = self.theme_name
+        theme_names = list(THEMES.keys())
+
+        dialog = tk.Toplevel(self.root)
+        self._theme_picker_dialog = dialog
+        dialog.title("Color Theme")
+        dialog.geometry("360x480")
+        dialog.transient(self.root)
+        try:
+            dialog.grab_set()
+        except tk.TclError:
+            pass
+        dialog.configure(bg=self.colors['bg'])
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{x}+{y}")
+
+        ttk.Label(dialog, text="Choose a color theme",
+                  font=('TkDefaultFont', 11, 'bold')).pack(pady=(14, 8))
+
+        list_frame = ttk.Frame(dialog)
+        list_frame.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 8))
+
+        scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        listbox = tk.Listbox(list_frame, exportselection=False, activestyle='none',
+                             bg=self.colors['entry_bg'],
+                             fg=self.colors['fg'],
+                             selectbackground=self.colors['accent'],
+                             selectforeground=self.colors['select_fg'],
+                             highlightthickness=1,
+                             highlightbackground=self.colors['border'],
+                             highlightcolor=self.colors['accent'],
+                             yscrollcommand=scrollbar.set)
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.config(command=listbox.yview)
+        self._theme_picker_listbox = listbox
+
+        for name in theme_names:
+            listbox.insert(tk.END, name)
+
+        hint = ttk.Label(dialog, text="↑/↓ preview   Enter apply   Esc cancel",
+                         foreground=self.colors['accent'])
+        hint.pack(pady=8)
+        self._theme_picker_hint = hint
+
+        def preview(event=None):
+            selection = listbox.curselection()
+            if selection:
+                self.apply_theme(theme_names[selection[0]])
+
+        def close(revert):
+            self._theme_picker_dialog = None
+            self._theme_picker_listbox = None
+            self._theme_picker_hint = None
+            if revert:
+                self.apply_theme(previous_theme)
+            dialog.destroy()
+
+        def apply_and_close(event=None):
+            selection = listbox.curselection()
+            if selection:
+                self.apply_theme(theme_names[selection[0]], save=True)
+            close(revert=False)
+            return "break"
+
+        def cancel(event=None):
+            close(revert=True)
+            return "break"
+
+        index = theme_names.index(previous_theme) if previous_theme in theme_names else 0
+        listbox.selection_set(index)
+        listbox.activate(index)
+        listbox.see(index)
+
+        listbox.bind('<<ListboxSelect>>', preview)
+        listbox.bind('<Return>', apply_and_close)
+        listbox.bind('<KP_Enter>', apply_and_close)
+        listbox.bind('<Double-Button-1>', apply_and_close)
+        listbox.bind('<Escape>', cancel)
+        dialog.bind('<Escape>', cancel)
+        dialog.protocol("WM_DELETE_WINDOW", cancel)
+
+        listbox.focus_set()
+
     def show_help(self):
         """Show keyboard shortcuts help dialog"""
         shortcuts = [
             ("Ctrl+Q", "Quit application"),
             ("Ctrl+O", "Select music root directory"),
+            ("Ctrl+/", "Open command palette"),
             ("Ctrl+F", "Focus search field"),
+            ("Ctrl+M", "Focus music files list"),
             ("Ctrl+N", "Scan directory"),
             ("Ctrl+P", "Create playlist"),
             ("Ctrl+Shift+P", "Play / Stop selected song"),
             ("Ctrl+Shift+L", "Show loop/BPM info"),
+            ("Shift+.", "Skip forward 5 seconds"),
+            ("Shift+,", "Skip back 5 seconds"),
+            ("Shift+-", "Lower volume"),
+            ("Shift+=", "Raise volume"),
             ("Ctrl+A", "Select all"),
             ("Ctrl+Shift+C", "Copy file path"),
             ("Ctrl+Shift+T", "Edit tags"),
+            ("Ctrl+Shift+D", "Compare selected duplicate files"),
             ("Delete", "Delete selected file(s)"),
             ("F2", "Rename selected file"),
             ("F5", "Refresh library list"),
+            ("j / k", "Move selection down / up (library focused)"),
+            ("g / G", "Jump to first / last file (library focused)"),
             ("Escape", "Clear selection"),
         ]
 
@@ -494,6 +1159,8 @@ class MusicPlaylistManager:
         self.last_root_dir = ''
         self.last_playlist_dir = ''
         self.last_export_dir = ''
+        self.recent_roots = []
+        self.theme_name = DEFAULT_THEME
         if self.config_path.exists():
             try:
                 with open(self.config_path, 'r') as f:
@@ -502,6 +1169,12 @@ class MusicPlaylistManager:
                     self.last_root_dir = config.get('last_root_dir', '')
                     self.last_playlist_dir = config.get('last_playlist_dir', '')
                     self.last_export_dir = config.get('last_export_dir', '')
+                    recent_roots = config.get('recent_roots', [])
+                    if isinstance(recent_roots, list):
+                        self.recent_roots = [r for r in recent_roots if isinstance(r, str)]
+                    theme = config.get('theme', DEFAULT_THEME)
+                    if theme in THEMES:
+                        self.theme_name = theme
             except (json.JSONDecodeError, IOError) as e:
                 print(f"Warning: Could not load config file: {e}")
                 print("Creating new config file...")
@@ -512,7 +1185,10 @@ class MusicPlaylistManager:
                     print(f"Backed up corrupted config to: {backup_path}")
                 # Initialize with default values
                 self.music_root = None
-                
+
+        if self.music_root and self.music_root not in self.recent_roots:
+            self.recent_roots.insert(0, self.music_root)
+
     def save_config(self):
         """Save configuration"""
         config = {
@@ -520,6 +1196,8 @@ class MusicPlaylistManager:
             'last_root_dir': self.last_root_dir,
             'last_playlist_dir': self.last_playlist_dir,
             'last_export_dir': self.last_export_dir,
+            'recent_roots': self.recent_roots,
+            'theme': self.theme_name,
         }
         with open(self.config_path, 'w') as f:
             json.dump(config, f)
@@ -538,6 +1216,16 @@ class MusicPlaylistManager:
         
         ttk.Button(top_frame, text="Select Root", 
                    command=self.select_root).pack(side=tk.LEFT)
+        self.recent_roots_menu = tk.Menu(self.root, tearoff=0,
+                                         bg=self.colors['button_bg'],
+                                         fg=self.colors['fg'],
+                                         activebackground=self.colors['accent'],
+                                         activeforeground=self.colors['select_fg'])
+        self.recent_roots_button = ttk.Button(top_frame, text="▼", width=3,
+                                              command=self.show_recent_roots_menu)
+        self.recent_roots_button.pack(side=tk.LEFT, padx=(2, 0))
+        ttk.Button(top_frame, text="Add Files", 
+                   command=self.add_files).pack(side=tk.LEFT, padx=5)
         ttk.Button(top_frame, text="Scan Directory", 
                    command=self.scan_directory).pack(side=tk.LEFT, padx=5)
         
@@ -545,8 +1233,13 @@ class MusicPlaylistManager:
         ttk.Separator(top_frame, orient='vertical').pack(side=tk.LEFT, fill=tk.Y, padx=20)
         
         # Selection info
-        self.selection_label = ttk.Label(top_frame, text="0 selected")
-        self.selection_label.pack(side=tk.LEFT, padx=5)
+        selection_frame = ttk.Frame(top_frame)
+        selection_frame.pack(side=tk.LEFT, padx=5)
+        self.selection_label = ttk.Label(selection_frame, text="0 selected")
+        self.selection_label.pack(anchor=tk.W)
+        self.runtime_label = ttk.Label(selection_frame, text="", 
+                                       foreground=self.colors['accent'])
+        self.runtime_label.pack(anchor=tk.W)
         
         ttk.Button(top_frame, text="Create Playlist", 
                    command=self.create_playlist_dialog).pack(side=tk.LEFT, padx=5)
@@ -612,26 +1305,26 @@ class MusicPlaylistManager:
         ttk.Label(search_frame, text="Tags:").pack(side=tk.LEFT, padx=(20, 5))
         self.tag_filter_var = tk.StringVar()
         self.tag_filter_var.trace('w', lambda *args: self.update_library_list())
-        tag_filter_entry = ttk.Entry(search_frame, textvariable=self.tag_filter_var, width=20)
-        tag_filter_entry.pack(side=tk.LEFT)
+        self.tag_filter_entry = ttk.Entry(search_frame, textvariable=self.tag_filter_var, width=20)
+        self.tag_filter_entry.pack(side=tk.LEFT)
         
         ttk.Label(search_frame, text="Artist:").pack(side=tk.LEFT, padx=(20, 5))
         self.artist_filter_var = tk.StringVar()
         self.artist_filter_var.trace('w', lambda *args: self.update_library_list())
-        artist_filter_entry = ttk.Entry(search_frame, textvariable=self.artist_filter_var, width=20)
-        artist_filter_entry.pack(side=tk.LEFT)
+        self.artist_filter_entry = ttk.Entry(search_frame, textvariable=self.artist_filter_var, width=20)
+        self.artist_filter_entry.pack(side=tk.LEFT)
         
         ttk.Label(search_frame, text="Album:").pack(side=tk.LEFT, padx=(20, 5))
         self.album_filter_var = tk.StringVar()
         self.album_filter_var.trace('w', lambda *args: self.update_library_list())
-        album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
-        album_filter_entry.pack(side=tk.LEFT)
+        self.album_filter_entry = ttk.Entry(search_frame, textvariable=self.album_filter_var, width=20)
+        self.album_filter_entry.pack(side=tk.LEFT)
 
         ttk.Label(search_frame, text="Path:").pack(side=tk.LEFT, padx=(20, 5))
         self.path_filter_var = tk.StringVar()
         self.path_filter_var.trace('w', lambda *args: self.update_library_list())
-        path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
-        path_filter_entry.pack(side=tk.LEFT)
+        self.path_filter_entry = ttk.Entry(search_frame, textvariable=self.path_filter_var, width=20)
+        self.path_filter_entry.pack(side=tk.LEFT)
 
         self.show_duplicates_var = tk.BooleanVar()
         self.show_duplicates_var.trace('w', lambda *args: self.update_library_list())
@@ -667,6 +1360,10 @@ class MusicPlaylistManager:
         self.library_tree.bind('<Double-Button-1>', self.edit_tags)
         self.library_tree.bind('<Button-3>', self.show_context_menu)
         self.library_tree.bind('<<TreeviewSelect>>', self.update_selection_count)
+        self.library_tree.bind('<KeyPress-j>', lambda e: self.move_library_selection(1))
+        self.library_tree.bind('<KeyPress-k>', lambda e: self.move_library_selection(-1))
+        self.library_tree.bind('<KeyPress-g>', lambda e: self._select_library_index(0))
+        self.library_tree.bind('<KeyPress-G>', lambda e: self.select_library_last())
         
 
         
@@ -688,6 +1385,7 @@ class MusicPlaylistManager:
         self.context_menu.add_command(label="Edit ID3 Metadata", command=self.edit_id3_metadata)
         self.context_menu.add_separator()
         self.context_menu.add_command(label="Copy File Path", command=self.copy_file_path)
+        self.context_menu.add_command(label="Copy Directory Path", command=self.copy_directory_path)
         self.context_menu.add_command(label="Delete File", command=self.delete_file)
         
         # Autocomplete frame (initially hidden)
@@ -744,9 +1442,89 @@ class MusicPlaylistManager:
                    command=self.show_help).pack(side=tk.RIGHT)
 
     def update_selection_count(self, event=None):
-        """Update the selection count label"""
-        selected = len(self.library_tree.selection())
+        """Update the selection count and total runtime labels"""
+        selected_items = self.library_tree.selection()
+        selected = len(selected_items)
         self.selection_label.config(text=f"{selected} selected")
+        
+        if not selected:
+            self.runtime_label.config(text="")
+            return
+        
+        song_ids = [self.library_tree.item(item)['text'] for item in selected_items]
+        
+        if not MUTAGEN_AVAILABLE:
+            self.runtime_label.config(text="")
+            return
+        
+        if all(song_id in self.duration_cache for song_id in song_ids):
+            total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+            return
+        
+        self.runtime_label.config(text="Total runtime: ...")
+        self.duration_request_id += 1
+        request_id = self.duration_request_id
+        
+        # Resolve paths on the main thread (sqlite is not thread-safe)
+        paths = {}
+        for song_id in song_ids:
+            if song_id in self.duration_cache:
+                continue
+            self.cursor.execute(
+                "SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+            row = self.cursor.fetchone()
+            if row:
+                paths[song_id] = Path(self.music_root) / row[0]
+        
+        if not paths:
+            total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+            return
+        
+        thread = threading.Thread(
+            target=self._compute_selected_runtime,
+            args=(request_id, song_ids, paths),
+            daemon=True)
+        thread.start()
+    
+    def _compute_selected_runtime(self, request_id, song_ids, paths):
+        """Background worker: read durations of selected files and total them"""
+        for song_id, file_path in paths.items():
+            duration = None
+            try:
+                if file_path.exists():
+                    audio_file = MutagenFile(file_path)
+                    if audio_file is not None and hasattr(audio_file, 'info') \
+                            and hasattr(audio_file.info, 'length'):
+                        duration = audio_file.info.length
+            except Exception:
+                duration = None
+            self.duration_cache[song_id] = duration
+        
+        if request_id != self.duration_request_id:
+            return
+        
+        total = sum(self.duration_cache[song_id] or 0 for song_id in song_ids)
+        self.root.after(0, lambda: self._apply_runtime_label(request_id, total))
+    
+    def _apply_runtime_label(self, request_id, total):
+        """Update the runtime label if this is still the latest selection"""
+        if request_id == self.duration_request_id:
+            self.runtime_label.config(
+                text=f"Total runtime: {self.format_duration(total)}")
+    
+    def format_duration(self, seconds):
+        """Format a duration in seconds as H:MM:SS or M:SS"""
+        seconds = int(round(seconds))
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+        secs = seconds % 60
+        if hours > 0:
+            return f"{hours}:{minutes:02d}:{secs:02d}"
+        return f"{minutes}:{secs:02d}"
     
     def sort_column(self, col, reverse):
         """Sort treeview contents when a column header is clicked"""
@@ -1025,6 +1803,43 @@ class MusicPlaylistManager:
             pygame.mixer.music.set_volume(self.current_volume)
             if self._wav_sound is not None:
                 self._wav_sound.set_volume(self.current_volume)
+
+    def _text_input_has_focus(self):
+        """Return True when a text field has keyboard focus"""
+        widget = self.root.focus_get()
+        if widget is None:
+            return False
+        try:
+            return widget.winfo_class() in ('Entry', 'TEntry', 'Text', 'TCombobox',
+                                            'Spinbox', 'TSpinbox')
+        except tk.TclError:
+            return False
+
+    def seek_playback(self, seconds):
+        """Seek forward or backward in the current song by seconds"""
+        if self._text_input_has_focus():
+            return None
+        if not PYGAME_AVAILABLE or self._wav_sound is not None:
+            return "break"
+        if not self.is_playing or not self.currently_playing or self.song_length <= 0:
+            return "break"
+
+        pos_ms = pygame.mixer.music.get_pos()
+        current_pos = self.song_start_time
+        if pos_ms >= 0:
+            current_pos += pos_ms / 1000.0
+        target = max(0.0, min(self.song_length, current_pos + seconds))
+        self.on_seek((target / self.song_length) * 100)
+        return "break"
+
+    def adjust_volume(self, delta):
+        """Change the playback volume by delta percentage points"""
+        if self._text_input_has_focus():
+            return None
+        new_volume = max(0.0, min(1.0, self.current_volume + delta / 100.0))
+        self.volume_slider.set(new_volume * 100)
+        self.on_volume_change(new_volume * 100)
+        return "break"
 
     def create_playlist_dialog(self):
         """Show dialog to create a playlist from selected songs"""
@@ -1525,25 +2340,220 @@ class MusicPlaylistManager:
         directory = filedialog.askdirectory(title="Select Music Root Directory",
                                             initialdir=self.last_root_dir or None)
         if directory:
-            self.music_root = directory
-            self.last_root_dir = directory
-            self.root_label.config(text=directory)
+            self.set_root(directory)
+
+    def set_root(self, directory, show_messages=True):
+        """Set the music root directory and load its database"""
+        self.music_root = directory
+        self.last_root_dir = directory
+        self.add_recent_root(directory)
+        self.root_label.config(text=directory)
+        self.save_config()
+        self.load_database()
+        self.update_library_list()
+
+        if not show_messages:
+            return
+
+        # Check if database has songs
+        self.cursor.execute("SELECT COUNT(*) FROM songs")
+        count = self.cursor.fetchone()[0]
+
+        if count > 0:
+            messagebox.showinfo("Database Loaded",
+                              f"Loaded existing database with {count} songs.\n"
+                              "Your tags and data have been preserved!")
+        else:
+            messagebox.showinfo("New Database",
+                              "New database created. Click 'Scan Directory' to add songs.")
+
+    def add_recent_root(self, directory):
+        """Move a root to the front of the recent roots list"""
+        if not directory:
+            return
+        if directory in self.recent_roots:
+            self.recent_roots.remove(directory)
+        self.recent_roots.insert(0, directory)
+        self.recent_roots = self.recent_roots[:20]
+
+    def show_recent_roots_menu(self):
+        """Show a menu of previously selected music roots"""
+        existing_roots = [path for path in self.recent_roots if os.path.isdir(path)]
+        if existing_roots != self.recent_roots:
+            self.recent_roots = existing_roots
             self.save_config()
-            self.load_database()
-            self.update_library_list()
-            
-            # Check if database has songs
-            self.cursor.execute("SELECT COUNT(*) FROM songs")
-            count = self.cursor.fetchone()[0]
-            
-            if count > 0:
-                messagebox.showinfo("Database Loaded", 
-                                  f"Loaded existing database with {count} songs.\n"
-                                  "Your tags and data have been preserved!")
+
+        self.recent_roots_menu.delete(0, tk.END)
+        if self.recent_roots:
+            for path in self.recent_roots:
+                self.recent_roots_menu.add_command(
+                    label=path,
+                    command=lambda p=path: self.select_recent_root(p))
+        else:
+            self.recent_roots_menu.add_command(label="No recent roots",
+                                               state=tk.DISABLED)
+
+        x = self.recent_roots_button.winfo_rootx()
+        y = self.recent_roots_button.winfo_rooty() + self.recent_roots_button.winfo_height()
+        try:
+            self.recent_roots_menu.tk_popup(x, y)
+        finally:
+            self.recent_roots_menu.grab_release()
+
+    def select_recent_root(self, directory):
+        """Select a music root from the recent roots menu"""
+        if not os.path.isdir(directory):
+            messagebox.showerror("Error",
+                                 f"Directory no longer exists:\n{directory}")
+            if directory in self.recent_roots:
+                self.recent_roots.remove(directory)
+                self.save_config()
+            return
+        self.set_root(directory, show_messages=False)
+
+    def extract_metadata(self, file_path):
+        """Extract artist and album tags from an audio file."""
+        artist = ""
+        album = ""
+
+        if not MUTAGEN_AVAILABLE:
+            return artist, album
+
+        try:
+            audio_file = MutagenFile(file_path)
+            if audio_file is not None:
+                suffix = file_path.suffix.lower()
+                # Extract artist and album based on file type
+                if suffix == '.mp3':
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = str(audio_file.tags.get('TPE1', [''])[0])
+                        album = str(audio_file.tags.get('TALB', [''])[0])
+                elif suffix == '.flac':
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('ARTIST', [''])[0]
+                        album = audio_file.tags.get('ALBUM', [''])[0]
+                elif suffix in ['.ogg', '.oga']:
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('ARTIST', [''])[0]
+                        album = audio_file.tags.get('ALBUM', [''])[0]
+                elif suffix in ['.m4a', '.mp4']:
+                    if hasattr(audio_file, 'tags') and audio_file.tags:
+                        artist = audio_file.tags.get('\xa9ART', [''])[0]
+                        album = audio_file.tags.get('\xa9alb', [''])[0]
+                else:
+                    try:
+                        easy_audio = EasyID3(file_path)
+                        artist = easy_audio.get('artist', [''])[0]
+                        album = easy_audio.get('album', [''])[0]
+                    except Exception:
+                        pass
+        except Exception:
+            pass  # Skip files with read errors
+
+        return artist, album
+
+    def add_files(self):
+        """Add individually selected audio files from within the music root."""
+        if not self.music_root:
+            messagebox.showerror("Error", "Please select a music root directory first")
+            return
+
+        if not os.path.exists(self.music_root):
+            messagebox.showerror("Error", "Music root directory does not exist")
+            return
+
+        music_root_path = Path(self.music_root).resolve()
+        audio_extensions = {'.mp3', '.wav', '.flac', '.m4a', '.ogg', '.aac', '.wma'}
+
+        selected_files = filedialog.askopenfilenames(
+            title="Select Audio Files to Add",
+            initialdir=self.music_root,
+            filetypes=[
+                ("Audio Files", "*.mp3 *.wav *.flac *.m4a *.ogg *.aac *.wma"),
+                ("All Files", "*.*")
+            ]
+        )
+
+        if not selected_files:
+            return
+
+        added_count = 0
+        updated_count = 0
+        skipped_count = 0
+        outside_root = []
+        invalid_files = []
+
+        for filename in selected_files:
+            file_path = Path(filename).resolve()
+
+            # Only allow files inside the current music root and its sub-directories
+            try:
+                relative_path = str(file_path.relative_to(music_root_path))
+            except ValueError:
+                outside_root.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            if not file_path.is_file():
+                invalid_files.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            if file_path.suffix.lower() not in audio_extensions:
+                invalid_files.append(str(file_path))
+                skipped_count += 1
+                continue
+
+            file_name = file_path.name
+            mtime = file_path.stat().st_mtime
+            artist, album = self.extract_metadata(file_path)
+
+            self.cursor.execute(
+                "SELECT id, last_modified, tags FROM songs WHERE relative_path = ?",
+                (relative_path,)
+            )
+            existing = self.cursor.fetchone()
+
+            if existing:
+                song_id, existing_mtime, existing_tags = existing
+                if mtime > (existing_mtime or 0):
+                    self.cursor.execute(
+                        "UPDATE songs SET filename = ?, tags = ?, artist = ?, album = ?, last_modified = ? WHERE id = ?",
+                        (file_name, existing_tags, artist, album, mtime, song_id)
+                    )
+                    updated_count += 1
+                else:
+                    skipped_count += 1
             else:
-                messagebox.showinfo("New Database", 
-                                  "New database created. Click 'Scan Directory' to add songs.")
-            
+                self.cursor.execute(
+                    "INSERT INTO songs (relative_path, filename, tags, artist, album, last_modified) VALUES (?, ?, ?, ?, ?, ?)",
+                    (relative_path, file_name, "", artist, album, mtime)
+                )
+                added_count += 1
+
+        self.conn.commit()
+        self.update_library_list()
+
+        summary_msg = f"Add Files Complete:\nAdded {added_count} new files.\n" \
+                      f"Updated {updated_count} existing files.\n" \
+                      f"Skipped {skipped_count} files."
+
+        if outside_root:
+            summary_msg += "\n\nSkipped files outside the music root:"
+            for path in outside_root[:10]:
+                summary_msg += f"\n  {path}"
+            if len(outside_root) > 10:
+                summary_msg += f"\n  ... and {len(outside_root) - 10} more"
+
+        if invalid_files:
+            summary_msg += "\n\nSkipped non-audio or missing files:"
+            for path in invalid_files[:10]:
+                summary_msg += f"\n  {path}"
+            if len(invalid_files) > 10:
+                summary_msg += f"\n  ... and {len(invalid_files) - 10} more"
+
+        messagebox.showinfo("Add Files Summary", summary_msg)
+
     def scan_directory(self):
         """
         Scans the music directory for new, updated, and deleted audio files.
@@ -1624,40 +2634,8 @@ class MusicPlaylistManager:
             progress_bar['value'] = idx + 1
             progress_dialog.update()
 
-            artist = ""
-            album = ""
+            artist, album = self.extract_metadata(file_path)
             current_tags = "" # Tags are preserved if already in DB, only metadata is updated from file
-
-            if MUTAGEN_AVAILABLE:
-                try:
-                    audio_file = MutagenFile(file_path)
-                    if audio_file is not None:
-                        # Extract artist and album based on file type
-                        if file_path.suffix.lower() == '.mp3':
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = str(audio_file.tags.get('TPE1', [''])[0])
-                                album = str(audio_file.tags.get('TALB', [''])[0])
-                        elif file_path.suffix.lower() == '.flac':
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('ARTIST', [''])[0]
-                                album = audio_file.tags.get('ALBUM', [''])[0]
-                        elif file_path.suffix.lower() in ['.ogg', '.oga']:
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('ARTIST', [''])[0]
-                                album = audio_file.tags.get('ALBUM', [''])[0]
-                        elif file_path.suffix.lower() in ['.m4a', '.mp4']:
-                            if hasattr(audio_file, 'tags') and audio_file.tags:
-                                artist = audio_file.tags.get('\xa9ART', [''])[0]
-                                album = audio_file.tags.get('\xa9alb', [''])[0]
-                        else:
-                            try:
-                                easy_audio = EasyID3(file_path)
-                                artist = easy_audio.get('artist', [''])[0]
-                                album = easy_audio.get('album', [''])[0]
-                            except:
-                                pass
-                except Exception:
-                    pass # Skip files with read errors
 
             if relative_path in db_songs:
                 # File exists in DB, check if updated
@@ -1708,6 +2686,36 @@ class MusicPlaylistManager:
                       f"Removed {deleted_count} deleted files."
         messagebox.showinfo("Scan Summary", summary_msg)
         
+    @staticmethod
+    def matches_path_filter(relative_path, path_filter):
+        """Check whether a song's path matches the path filter.
+
+        Plain text is matched as a case-insensitive substring. Wildcards
+        (*, ? and [seq]) use glob matching. Patterns can match any part of
+        the path, so a directory pattern also matches songs in it.
+        """
+        pattern = path_filter.replace('\\', '/').strip().strip('/').lower()
+        if not pattern:
+            return True
+
+        relative_path = relative_path.replace('\\', '/').strip('/')
+        segments = [part for part in relative_path.split('/') if part]
+
+        # Try every contiguous slice of the path so a pattern can start at
+        # any directory, not just the music root.
+        candidates = set()
+        for start in range(len(segments)):
+            for end in range(start + 1, len(segments) + 1):
+                candidates.add('/'.join(segments[start:end]).lower())
+        if len(segments) <= 1:
+            candidates.add('(root)')
+
+        if not any(ch in pattern for ch in '*?['):
+            return any(pattern in candidate for candidate in candidates)
+
+        return any(fnmatch.fnmatchcase(candidate, pattern)
+                   for candidate in candidates)
+
     def update_library_list(self):
         """Update the library list based on search filters"""
         if not self.conn:
@@ -1730,18 +2738,17 @@ class MusicPlaylistManager:
             conditions.append("filename IN (SELECT filename FROM songs GROUP BY filename HAVING COUNT(*) > 1)")
 
         # If path filter is used, only apply path filter
-        if path_filter:
-            like_pattern = path_filter.replace('*', '%').replace('?', '_')
-            conditions.append("LOWER(relative_path) LIKE ?")
-            params.append(like_pattern)
-        else:
+        if not path_filter:
             # Otherwise apply all other filters
             if search_term:
                 conditions.append("LOWER(filename) LIKE ?")
                 params.append(f"%{search_term}%")
             if tag_filter:
-                conditions.append("LOWER(tags) LIKE ?")
-                params.append(f"%{tag_filter}%")
+                for tag in tag_filter.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        conditions.append("LOWER(tags) LIKE ?")
+                        params.append(f"%{tag}%")
             if artist_filter:
                 conditions.append("LOWER(artist) LIKE ?")
                 params.append(f"%{artist_filter}%")
@@ -1753,8 +2760,13 @@ class MusicPlaylistManager:
             query += " WHERE " + " AND ".join(conditions)
             
         self.cursor.execute(query, params)
+        rows = self.cursor.fetchall()
+
+        if path_filter:
+            rows = [row for row in rows
+                    if self.matches_path_filter(row[2], path_filter)]
         
-        for row in self.cursor.fetchall():
+        for row in rows:
             song_id, filename, relative_path, artist, album, tags = row
             # Extract parent directory path without filename
             parent_path = str(Path(relative_path).parent)
@@ -2196,6 +3208,206 @@ class MusicPlaylistManager:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to copy path: {str(e)}")
     
+    def copy_directory_path(self):
+        """Copy the full path of the selected file's directory to clipboard"""
+        selection = self.library_tree.selection()
+        if not selection:
+            return
+        
+        item = self.library_tree.item(selection[0])
+        song_id = item['text']
+        
+        # Get the file path from database
+        self.cursor.execute("SELECT relative_path FROM songs WHERE id = ?", (song_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            messagebox.showerror("Error", "Song not found in database")
+            return
+        
+        directory_path = (Path(self.music_root) / row[0]).parent
+        
+        if not directory_path.exists():
+            messagebox.showerror("Error", f"Directory not found: {directory_path}")
+            return
+        
+        # Copy to clipboard
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(directory_path))
+            self.root.update()  # Keep the clipboard content after window closes
+            
+            # Show a brief confirmation in the status area
+            original_text = self.now_playing_label.cget("text")
+            self.now_playing_label.config(text="✓ Directory path copied to clipboard")
+            self.root.after(2000, lambda: self.now_playing_label.config(text=original_text))
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to copy directory path: {str(e)}")
+    
+    def show_duplicate_comparison_dialog(self):
+        """Show side-by-side folder context for 1-5 selected duplicate files."""
+        selected_items = self.library_tree.selection()
+        if not selected_items:
+            messagebox.showinfo("No Selection", "Please select 1 to 5 files to compare.")
+            return
+        if len(selected_items) > 5:
+            messagebox.showinfo("Too Many Files", "Please select at most 5 files to compare.")
+            return
+
+        targets = []
+        for item_id in selected_items:
+            item = self.library_tree.item(item_id)
+            song_id = item['text']
+            self.cursor.execute(
+                "SELECT relative_path, filename FROM songs WHERE id = ?", (song_id,))
+            row = self.cursor.fetchone()
+            if not row:
+                continue
+            relative_path, filename = row
+            targets.append({
+                'song_id': song_id,
+                'filename': filename,
+                'path': Path(self.music_root) / relative_path,
+            })
+
+        if not targets:
+            messagebox.showerror("Error", "Selected songs could not be found in the database.")
+            return
+
+        dialog = tk.Toplevel(self.root)
+        dialog.title(f"Compare Duplicate Files ({len(targets)})")
+        column_width = 300
+        width = min(dialog.winfo_screenwidth() - 80,
+                    max(420, column_width * len(targets) + 40))
+        dialog.geometry(f"{width}x560")
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=self.colors['bg'])
+        dialog.resizable(True, True)
+        dialog.minsize(420, 360)
+
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - (dialog.winfo_width() // 2)
+        y = (dialog.winfo_screenheight() // 2) - (dialog.winfo_height() // 2)
+        dialog.geometry(f"+{max(0, x)}+{max(0, y)}")
+
+        instruction = ttk.Label(
+            dialog,
+            text="Compare the folders containing each selected duplicate. "
+                 "Use the Delete button under a file to remove it.",
+            wraplength=width - 40)
+        instruction.pack(pady=(10, 5))
+
+        def resize_instruction(event):
+            if event.widget is dialog:
+                instruction.configure(wraplength=max(200, event.width - 40))
+
+        dialog.bind('<Configure>', resize_instruction)
+
+        columns_frame = ttk.Frame(dialog)
+        columns_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        def delete_target(target, column):
+            if not messagebox.askyesno(
+                    "Confirm Delete",
+                    f"Are you sure you want to delete this file?\n\n"
+                    f"{target['filename']}\n{target['path']}\n\n"
+                    "This action cannot be undone!", parent=dialog):
+                return
+
+            try:
+                if target['path'].exists():
+                    target['path'].unlink()
+
+                self.cursor.execute("DELETE FROM songs WHERE id = ?", (target['song_id'],))
+                self.conn.commit()
+                self.duration_cache.pop(str(target['song_id']), None)
+                self.update_library_list()
+
+                column.destroy()
+                if not columns_frame.winfo_children():
+                    dialog.destroy()
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to delete file: {str(e)}", parent=dialog)
+
+        for target in targets:
+            column = ttk.Frame(columns_frame)
+            column.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=4)
+
+            parent = target['path'].parent
+            try:
+                parent_label = str(parent.relative_to(Path(self.music_root)))
+            except ValueError:
+                parent_label = str(parent)
+            if parent_label in ('', '.'):
+                parent_label = '(music root)'
+
+            try:
+                entries = sorted(parent.iterdir(),
+                                 key=lambda p: (not p.is_dir(), p.name.lower()))
+            except OSError:
+                entries = []
+
+            sibling_count = sum(1 for entry in entries if entry != target['path'])
+            sibling_label = f"{sibling_count} sibling{'s' if sibling_count != 1 else ''}"
+
+            header = ttk.Frame(column)
+            header.pack(fill=tk.X)
+            ttk.Label(header, text=target['filename'],
+                      font=('TkDefaultFont', 10, 'bold')).pack(anchor=tk.W)
+            ttk.Label(header, text=parent_label,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+            ttk.Label(header, text=sibling_label,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+
+            try:
+                stat = target['path'].stat()
+                details = (f"{stat.st_size / (1024 * 1024):.2f} MB  -  "
+                           f"{datetime.fromtimestamp(stat.st_mtime):%Y-%m-%d %H:%M}")
+            except OSError:
+                details = "File not found on disk"
+            ttk.Label(header, text=details,
+                      foreground=self.colors['accent']).pack(anchor=tk.W)
+
+            list_frame = ttk.Frame(column)
+            list_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+            scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL)
+            scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            listbox = tk.Listbox(list_frame,
+                                 yscrollcommand=scrollbar.set,
+                                 bg=self.colors['entry_bg'],
+                                 fg=self.colors['fg'],
+                                 selectbackground=self.colors['accent'],
+                                 selectforeground=self.colors['select_fg'],
+                                 borderwidth=1,
+                                 relief='solid',
+                                 exportselection=False)
+            listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            scrollbar.config(command=listbox.yview)
+
+            highlight_index = None
+            for entry in entries:
+                is_dir = entry.is_dir()
+                listbox.insert(tk.END, entry.name + ('/' if is_dir else ''))
+                if not is_dir and entry.name == target['filename']:
+                    highlight_index = listbox.size() - 1
+
+            if highlight_index is not None:
+                listbox.itemconfig(highlight_index,
+                                   background=self.colors['accent'],
+                                   foreground=self.colors['select_fg'])
+                listbox.see(highlight_index)
+            elif not entries:
+                listbox.insert(tk.END, '(folder is empty or unavailable)')
+                listbox.itemconfig(0, foreground=self.colors['accent'])
+
+            ttk.Button(column, text="Delete This File",
+                       command=lambda t=target, c=column: delete_target(t, c)).pack(
+                           fill=tk.X, pady=(0, 4))
+
+        ttk.Button(dialog, text="Close", command=dialog.destroy).pack(pady=(0, 10))
+        dialog.bind('<Escape>', lambda e: dialog.destroy())
+
     def delete_file(self):
         """Delete the selected file"""
         selection = self.library_tree.selection()
