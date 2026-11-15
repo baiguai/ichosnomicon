@@ -43,6 +43,7 @@ class MusicPlaylistManager:
         self.root.bind('<Control-q>', lambda e: self.quit_app())
         self.root.bind('<Control-o>', lambda e: self.select_root())
         self.root.bind('<Control-f>', lambda e: self.focus_search())
+        self.root.bind('<Control-m>', lambda e: self.focus_library())
         self.root.bind('<Control-n>', lambda e: self.scan_directory())
         self.root.bind('<Control-p>', lambda e: self.create_playlist_dialog())
         self.root.bind('<Delete>', lambda e: self.delete_selected_files())
@@ -229,6 +230,29 @@ class MusicPlaylistManager:
                 self.library_tree.see(first)
                 self.update_selection_count()
         self.library_tree.focus_set()
+
+    def _select_library_index(self, index):
+        """Select and reveal a library row by index"""
+        items = self.library_tree.get_children()
+        if not items:
+            return "break"
+        index = max(0, min(len(items) - 1, index))
+        item = items[index]
+        self.library_tree.selection_set(item)
+        self.library_tree.focus(item)
+        self.library_tree.see(item)
+        self.update_selection_count()
+        return "break"
+
+    def move_library_selection(self, delta):
+        """Move the library selection up or down"""
+        selection = self.library_tree.selection()
+        index = self.library_tree.index(selection[0]) + delta if selection else 0
+        return self._select_library_index(index)
+
+    def select_library_last(self):
+        """Select the last row in the library"""
+        return self._select_library_index(len(self.library_tree.get_children()) - 1)
     
     def delete_selected_files(self):
         """Delete all selected files"""
@@ -491,6 +515,7 @@ class MusicPlaylistManager:
             ("Ctrl+O", "Select music root directory"),
             ("Ctrl+/", "Open command palette"),
             ("Ctrl+F", "Focus search field"),
+            ("Ctrl+M", "Focus music files list"),
             ("Ctrl+N", "Scan directory"),
             ("Ctrl+P", "Create playlist"),
             ("Ctrl+Shift+P", "Play / Stop selected song"),
@@ -502,6 +527,8 @@ class MusicPlaylistManager:
             ("Delete", "Delete selected file(s)"),
             ("F2", "Rename selected file"),
             ("F5", "Refresh library list"),
+            ("j / k", "Move selection down / up (library focused)"),
+            ("g / G", "Jump to first / last file (library focused)"),
             ("Escape", "Clear selection"),
         ]
 
@@ -894,6 +921,10 @@ class MusicPlaylistManager:
         self.library_tree.bind('<Double-Button-1>', self.edit_tags)
         self.library_tree.bind('<Button-3>', self.show_context_menu)
         self.library_tree.bind('<<TreeviewSelect>>', self.update_selection_count)
+        self.library_tree.bind('<KeyPress-j>', lambda e: self.move_library_selection(1))
+        self.library_tree.bind('<KeyPress-k>', lambda e: self.move_library_selection(-1))
+        self.library_tree.bind('<KeyPress-g>', lambda e: self._select_library_index(0))
+        self.library_tree.bind('<KeyPress-G>', lambda e: self.select_library_last())
         
 
         
@@ -2238,8 +2269,11 @@ class MusicPlaylistManager:
                 conditions.append("LOWER(filename) LIKE ?")
                 params.append(f"%{search_term}%")
             if tag_filter:
-                conditions.append("LOWER(tags) LIKE ?")
-                params.append(f"%{tag_filter}%")
+                for tag in tag_filter.split(','):
+                    tag = tag.strip()
+                    if tag:
+                        conditions.append("LOWER(tags) LIKE ?")
+                        params.append(f"%{tag}%")
             if artist_filter:
                 conditions.append("LOWER(artist) LIKE ?")
                 params.append(f"%{artist_filter}%")
