@@ -319,6 +319,10 @@ class MusicPlaylistManager:
         self.root.bind('<Control-Shift-L>', lambda e: self.show_loop_info())
         self.root.bind('<Control-slash>', lambda e: self.show_command_palette())
         self.root.bind('<Control-Key-slash>', lambda e: self.show_command_palette())
+        self.root.bind('<greater>', lambda e: self.seek_playback(5))
+        self.root.bind('<less>', lambda e: self.seek_playback(-5))
+        self.root.bind('<underscore>', lambda e: self.adjust_volume(-5))
+        self.root.bind('<plus>', lambda e: self.adjust_volume(5))
         self.root.bind('<Escape>', lambda e: self.clear_selection())
         
         # Audio playback state
@@ -946,6 +950,10 @@ class MusicPlaylistManager:
             ("Ctrl+P", "Create playlist"),
             ("Ctrl+Shift+P", "Play / Stop selected song"),
             ("Ctrl+Shift+L", "Show loop/BPM info"),
+            ("Shift+.", "Skip forward 5 seconds"),
+            ("Shift+,", "Skip back 5 seconds"),
+            ("Shift+-", "Lower volume"),
+            ("Shift+=", "Raise volume"),
             ("Ctrl+A", "Select all"),
             ("Ctrl+Shift+C", "Copy file path"),
             ("Ctrl+Shift+T", "Edit tags"),
@@ -1795,6 +1803,43 @@ class MusicPlaylistManager:
             pygame.mixer.music.set_volume(self.current_volume)
             if self._wav_sound is not None:
                 self._wav_sound.set_volume(self.current_volume)
+
+    def _text_input_has_focus(self):
+        """Return True when a text field has keyboard focus"""
+        widget = self.root.focus_get()
+        if widget is None:
+            return False
+        try:
+            return widget.winfo_class() in ('Entry', 'TEntry', 'Text', 'TCombobox',
+                                            'Spinbox', 'TSpinbox')
+        except tk.TclError:
+            return False
+
+    def seek_playback(self, seconds):
+        """Seek forward or backward in the current song by seconds"""
+        if self._text_input_has_focus():
+            return None
+        if not PYGAME_AVAILABLE or self._wav_sound is not None:
+            return "break"
+        if not self.is_playing or not self.currently_playing or self.song_length <= 0:
+            return "break"
+
+        pos_ms = pygame.mixer.music.get_pos()
+        current_pos = self.song_start_time
+        if pos_ms >= 0:
+            current_pos += pos_ms / 1000.0
+        target = max(0.0, min(self.song_length, current_pos + seconds))
+        self.on_seek((target / self.song_length) * 100)
+        return "break"
+
+    def adjust_volume(self, delta):
+        """Change the playback volume by delta percentage points"""
+        if self._text_input_has_focus():
+            return None
+        new_volume = max(0.0, min(1.0, self.current_volume + delta / 100.0))
+        self.volume_slider.set(new_volume * 100)
+        self.on_volume_change(new_volume * 100)
+        return "break"
 
     def create_playlist_dialog(self):
         """Show dialog to create a playlist from selected songs"""
